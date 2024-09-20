@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1,2
 
 python src/run_kbnet.py \
 --image_path validation/kitti/kitti_val_image.txt \
@@ -28,8 +28,6 @@ python src/run_kbnet.py \
 --min_evaluate_depth 0.0 \
 --max_evaluate_depth 100.0 \
 --save_outputs \
---depth_model_restore_path \
-pretrained_models/kitti/kbnet-kitti.pth \
---output_path \
-pretrained_models/kitti/evaluation_results/kitti_validation \
+--depth_model_restore_path trained_kbnet/kitti/kbnet_model/depth_model-181020.pth \
+--output_path trained_kbnet/kitti/kbnet_model \
 --device gpu

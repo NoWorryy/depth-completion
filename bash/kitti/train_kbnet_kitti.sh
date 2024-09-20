@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=0,1,4
 
 python src/train_kbnet.py \
 --train_image_path training/kitti/kitti_train_image-clean.txt \
@@ -10,7 +10,7 @@ python src/train_kbnet.py \
 --val_sparse_depth_path validation/kitti/kitti_val_sparse_depth.txt \
 --val_intrinsics_path validation/kitti/kitti_val_intrinsics.txt \
 --val_ground_truth_path validation/kitti/kitti_val_ground_truth.txt \
---n_batch 8 \
+--n_batch 24 \
 --n_height 320 \
 --n_width 768 \
 --input_channels_image 3 \
@@ -49,7 +49,7 @@ python src/train_kbnet.py \
 --max_evaluate_depth 100.0 \
 --n_summary 5000 \
 --n_checkpoint 5000 \
---validation_start 300000 \
---checkpoint_path trained_kbnet/kitti/kbnet_model \
+--validation_start 100000 \
+--checkpoint_path trained_kbnet/kitti \
 --device gpu \
 --n_thread 8

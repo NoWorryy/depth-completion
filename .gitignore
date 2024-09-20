@@ -8,3 +8,4 @@ tools/_jupyter/.ipynb_checkpoints
 training
 validation
 testing
+trained_kbnet

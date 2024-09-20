@@ -191,15 +191,18 @@ mkdir -p data/kitti_depth_completion/validation
 mkdir -p data/kitti_depth_completion/testing
 mkdir -p data/kitti_depth_completion/tmp
 
+# data_depth_velodyne包含了所有稀疏深度图，data_depth_annotated包含了真实深度图，放在data/kitti_depth_completion/train_val_split
 unzip data/data_depth_velodyne.zip -d data/kitti_depth_completion/train_val_split/sparse_depth
 unzip data/data_depth_annotated.zip -d data/kitti_depth_completion/train_val_split/ground_truth
 unzip data/data_depth_selection.zip -d data/kitti_depth_completion/tmp
 
+# val_selection_cropped包含了验证集里的图像、激光、gt_depth、内参，放在data/kitti_depth_completion/validation
 mv data/kitti_depth_completion/tmp/depth_selection/val_selection_cropped/image data/kitti_depth_completion/validation/image
 mv data/kitti_depth_completion/tmp/depth_selection/val_selection_cropped/velodyne_raw data/kitti_depth_completion/validation/sparse_depth
 mv data/kitti_depth_completion/tmp/depth_selection/val_selection_cropped/groundtruth_depth data/kitti_depth_completion/validation/ground_truth
 mv data/kitti_depth_completion/tmp/depth_selection/val_selection_cropped/intrinsics data/kitti_depth_completion/validation/intrinsics
 
+# test_depth_completion_anonymous里包含了测试机的图像、激光和内参，放在data/kitti_depth_completion/testing
 mv data/kitti_depth_completion/tmp/depth_selection/test_depth_completion_anonymous/image data/kitti_depth_completion/testing/image
 mv data/kitti_depth_completion/tmp/depth_selection/test_depth_completion_anonymous/velodyne_raw data/kitti_depth_completion/testing/sparse_depth
 mv data/kitti_depth_completion/tmp/depth_selection/test_depth_completion_anonymous/intrinsics data/kitti_depth_completion/testing/intrinsics

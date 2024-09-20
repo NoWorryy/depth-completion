@@ -26,86 +26,31 @@ from posenet_model import PoseNetModel
 import global_constants as settings
 from transforms import Transforms
 from net_utils import OutlierRemoval
+import datetime
+from tqdm import tqdm
 
 
-def train(train_image_path,
-          train_sparse_depth_path,
-          train_intrinsics_path,
-          val_image_path,
-          val_sparse_depth_path,
-          val_intrinsics_path,
-          val_ground_truth_path,
-          # Batch settings
-          n_batch=settings.N_BATCH,
-          n_height=settings.N_HEIGHT,
-          n_width=settings.N_WIDTH,
-          # Input settings
-          input_channels_image=settings.INPUT_CHANNELS_IMAGE,
-          input_channels_depth=settings.INPUT_CHANNELS_DEPTH,
-          normalized_image_range=settings.NORMALIZED_IMAGE_RANGE,
-          outlier_removal_kernel_size=settings.OUTLIER_REMOVAL_KERNEL_SIZE,
-          outlier_removal_threshold=settings.OUTLIER_REMOVAL_THRESHOLD,
-          # Sparse to dense pool settings
-          min_pool_sizes_sparse_to_dense_pool=settings.MIN_POOL_SIZES_SPARSE_TO_DENSE_POOL,
-          max_pool_sizes_sparse_to_dense_pool=settings.MAX_POOL_SIZES_SPARSE_TO_DENSE_POOL,
-          n_convolution_sparse_to_dense_pool=settings.N_CONVOLUTION_SPARSE_TO_DENSE_POOL,
-          n_filter_sparse_to_dense_pool=settings.N_FILTER_SPARSE_TO_DENSE_POOL,
-          # Depth network settings
-          n_filters_encoder_image=settings.N_FILTERS_ENCODER_IMAGE,
-          n_filters_encoder_depth=settings.N_FILTERS_ENCODER_DEPTH,
-          resolutions_backprojection=settings.RESOLUTIONS_BACKPROJECTION,
-          n_filters_decoder=settings.N_FILTERS_DECODER,
-          deconv_type=settings.DECONV_TYPE,
-          min_predict_depth=settings.MIN_PREDICT_DEPTH,
-          max_predict_depth=settings.MAX_PREDICT_DEPTH,
-          # Weight settings
-          weight_initializer=settings.WEIGHT_INITIALIZER,
-          activation_func=settings.ACTIVATION_FUNC,
-          # Training settings
-          learning_rates=settings.LEARNING_RATES,
-          learning_schedule=settings.LEARNING_SCHEDULE,
-          augmentation_probabilities=settings.AUGMENTATION_PROBABILITIES,
-          augmentation_schedule=settings.AUGMENTATION_SCHEDULE,
-          augmentation_random_crop_type=settings.AUGMENTATION_RANDOM_CROP_TYPE,
-          augmentation_random_flip_type=settings.AUGMENTATION_RANDOM_FLIP_TYPE,
-          augmentation_random_remove_points=settings.AUGMENTATION_RANDOM_REMOVE_POINTS,
-          augmentation_random_noise_type=settings.AUGMENTATION_RANDOM_NOISE_TYPE,
-          augmentation_random_noise_spread=settings.AUGMENTATION_RANDOM_NOISE_SPREAD,
-          # Loss function settings
-          w_color=settings.W_COLOR,
-          w_structure=settings.W_STRUCTURE,
-          w_sparse_depth=settings.W_SPARSE_DEPTH,
-          w_smoothness=settings.W_SMOOTHNESS,
-          w_weight_decay_depth=settings.W_WEIGHT_DECAY_DEPTH,
-          w_weight_decay_pose=settings.W_WEIGHT_DECAY_POSE,
-          # Evaluation settings
-          min_evaluate_depth=settings.MIN_EVALUATE_DEPTH,
-          max_evaluate_depth=settings.MAX_EVALUATE_DEPTH,
-          # Checkpoint settings
-          checkpoint_path=settings.CHECKPOINT_PATH,
-          n_checkpoint=settings.N_CHECKPOINT,
-          n_summary=settings.N_SUMMARY,
-          n_summary_display=settings.N_SUMMARY_DISPLAY,
-          validation_start_step=settings.VALIDATION_START_STEP,
-          depth_model_restore_path=settings.RESTORE_PATH,
-          pose_model_restore_path=settings.RESTORE_PATH,
-          # Hardware settings
-          device=settings.DEVICE,
-          n_thread=settings.N_THREAD):
+def train(device: str,
+          file_paths: dict,
+          model_params: dict,
+          train_params: dict,
+          output_params: dict):
 
-    if device == settings.CUDA or device == settings.GPU:
-        device = torch.device(settings.CUDA)
-    else:
-        device = torch.device(settings.CPU)
 
-    if not os.path.exists(checkpoint_path):
-        os.makedirs(checkpoint_path)
 
-    # Set up checkpoint and event paths
-    depth_model_checkpoint_path = os.path.join(checkpoint_path, 'depth_model-{}.pth')
-    pose_model_checkpoint_path = os.path.join(checkpoint_path, 'pose_model-{}.pth')
-    log_path = os.path.join(checkpoint_path, 'results.txt')
-    event_path = os.path.join(checkpoint_path, 'events')
+    # if not os.path.exists(output_params.checkpoint_path):
+    #     os.makedirs(output_params.checkpoint_path)
+
+    folder_name = datetime.datetime.now().strftime("-%Y-%m-%dT%H-%M-%S")
+    output_dir = os.path.join(output_params.output_dir, folder_name)
+    
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(f"{output_dir}/checkpoints", exist_ok=True)
+
+    depth_model_checkpoint_path = os.path.join(output_dir, 'checkpoints', 'depth_model-{}.pth')
+    pose_model_checkpoint_path = os.path.join(output_dir, 'checkpoints', 'pose_model-{}.pth')
+    log_path = os.path.join(output_dir, 'results.txt')
+    event_path = os.path.join(output_dir, 'events')
 
     best_results = {
         'step': -1,
@@ -119,28 +64,38 @@ def train(train_image_path,
     Load input paths and set up dataloaders
     '''
     # Read paths for training
-    train_image_paths = data_utils.read_paths(train_image_path)
-    train_sparse_depth_paths = data_utils.read_paths(train_sparse_depth_path)
-    train_intrinsics_paths = data_utils.read_paths(train_intrinsics_path)
+    train_image_paths = data_utils.read_paths(file_paths.train_image_path) # kitti_train_image-clean.txt
+    train_sparse_depth_paths = data_utils.read_paths(file_paths.train_sparse_depth_path)
+    train_intrinsics_paths = data_utils.read_paths(file_paths.train_intrinsics_path)
 
-    n_train_sample = len(train_image_paths)
+    n_train_sample = len(train_image_paths) # 72400
 
     assert len(train_sparse_depth_paths) == n_train_sample
     assert len(train_intrinsics_paths) == n_train_sample
 
     n_train_step = \
-        learning_schedule[-1] * np.ceil(n_train_sample / n_batch).astype(np.int32)
+        train_params.learning_schedule[-1] * np.ceil(n_train_sample / n_batch).astype(np.int32)  # 60epochs, bs:24, sample:72400, step:181020    
+    
+    log('-----------------new training----------------------', log_path)
+    log(f'start time: {datetime.datetime.now()}', log_path)
+    log('', log_path)
+    log(f'Training samples: {n_train_sample}', log_path)
+    log(f'Batch size: {n_batch}', log_path)
+    log(f'Total training epochs: {learning_schedule[-1]}', log_path)
+    log(f'Total training step: {n_train_step}', log_path)
 
-    train_dataloader = torch.utils.data.DataLoader(
-        datasets.KBNetTrainingDataset(
+    train_dataset = datasets.KBNetTrainingDataset(
             image_paths=train_image_paths,
             sparse_depth_paths=train_sparse_depth_paths,
             intrinsics_paths=train_intrinsics_paths,
-            shape=(n_height, n_width),
-            random_crop_type=augmentation_random_crop_type),
-        batch_size=n_batch,
+            shape=(n_height, n_width),  # (320, 768)
+            random_crop_type=augmentation_random_crop_type)
+
+    train_dataloader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=train_params.n_batch,
         shuffle=True,
-        num_workers=n_thread,
+        num_workers=train_params.n_thread,
         drop_last=False)
 
     train_transforms = Transforms(
@@ -167,6 +122,8 @@ def train(train_image_path,
         assert len(val_sparse_depth_paths) == n_val_sample
         assert len(val_intrinsics_paths) == n_val_sample
         assert len(val_ground_truth_paths) == n_val_sample
+        log(f'Validation samples: {n_val_sample}', log_path)
+        log('', log_path)
 
         ground_truths = []
         for path in val_ground_truth_paths:
@@ -230,7 +187,7 @@ def train(train_image_path,
     pose_model.train()
 
     if depth_model_restore_path is not None and depth_model_restore_path != '':
-        depth_model.restore_model(depth_model_restore_path)
+        ckpt_train_step, _ = depth_model.restore_model(depth_model_restore_path)
 
     if pose_model_restore_path is not None and pose_model_restore_path != '':
         pose_model.restore_model(pose_model_restore_path)
@@ -239,113 +196,6 @@ def train(train_image_path,
     train_summary_writer = SummaryWriter(event_path + '-train')
     val_summary_writer = SummaryWriter(event_path + '-val')
 
-    '''
-    Log input paths
-    '''
-    log('Training input paths:', log_path)
-    train_input_paths = [
-        train_image_path,
-        train_sparse_depth_path,
-        train_intrinsics_path
-    ]
-    for path in train_input_paths:
-        log(path, log_path)
-    log('', log_path)
-
-    log('Validation input paths:', log_path)
-    val_input_paths = [
-        val_image_path,
-        val_sparse_depth_path,
-        val_intrinsics_path,
-        val_ground_truth_path
-    ]
-    for path in val_input_paths:
-        log(path, log_path)
-    log('', log_path)
-
-    '''
-    Log all settings
-    '''
-    log_input_settings(
-        log_path,
-        # Batch settings
-        n_batch=n_batch,
-        n_height=n_height,
-        n_width=n_width,
-        # Input settings
-        input_channels_image=input_channels_image,
-        input_channels_depth=input_channels_depth,
-        normalized_image_range=normalized_image_range,
-        outlier_removal_kernel_size=outlier_removal_kernel_size,
-        outlier_removal_threshold=outlier_removal_threshold)
-
-    log_network_settings(
-        log_path,
-        # Sparse to dense pool settings
-        min_pool_sizes_sparse_to_dense_pool=min_pool_sizes_sparse_to_dense_pool,
-        max_pool_sizes_sparse_to_dense_pool=max_pool_sizes_sparse_to_dense_pool,
-        n_convolution_sparse_to_dense_pool=n_convolution_sparse_to_dense_pool,
-        n_filter_sparse_to_dense_pool=n_filter_sparse_to_dense_pool,
-        # Depth network settings
-        n_filters_encoder_image=n_filters_encoder_image,
-        n_filters_encoder_depth=n_filters_encoder_depth,
-        resolutions_backprojection=resolutions_backprojection,
-        n_filters_decoder=n_filters_decoder,
-        deconv_type=deconv_type,
-        min_predict_depth=min_predict_depth,
-        max_predict_depth=max_predict_depth,
-        # Weight settings
-        weight_initializer=weight_initializer,
-        activation_func=activation_func,
-        parameters_depth_model=parameters_depth_model,
-        parameters_pose_model=parameters_pose_model)
-
-    log_training_settings(
-        log_path,
-        # Training settings
-        n_batch=n_batch,
-        n_train_sample=n_train_sample,
-        n_train_step=n_train_step,
-        learning_rates=learning_rates,
-        learning_schedule=learning_schedule,
-        # Augmentation settings
-        augmentation_probabilities=augmentation_probabilities,
-        augmentation_schedule=augmentation_schedule,
-        augmentation_random_crop_type=augmentation_random_crop_type,
-        augmentation_random_flip_type=augmentation_random_flip_type,
-        augmentation_random_remove_points=augmentation_random_remove_points,
-        augmentation_random_noise_type=augmentation_random_noise_type,
-        augmentation_random_noise_spread=augmentation_random_noise_spread)
-
-    log_loss_func_settings(
-        log_path,
-        # Loss function settings
-        w_color=w_color,
-        w_structure=w_structure,
-        w_sparse_depth=w_sparse_depth,
-        w_smoothness=w_smoothness,
-        w_weight_decay_depth=w_weight_decay_depth,
-        w_weight_decay_pose=w_weight_decay_pose)
-
-    log_evaluation_settings(
-        log_path,
-        min_evaluate_depth=min_evaluate_depth,
-        max_evaluate_depth=max_evaluate_depth)
-
-    log_system_settings(
-        log_path,
-        # Checkpoint settings
-        checkpoint_path=checkpoint_path,
-        n_checkpoint=n_checkpoint,
-        summary_event_path=event_path,
-        n_summary=n_summary,
-        n_summary_display=n_summary_display,
-        validation_start_step=validation_start_step,
-        depth_model_restore_path=depth_model_restore_path,
-        pose_model_restore_path=pose_model_restore_path,
-        # Hardware settings
-        device=device,
-        n_thread=n_thread)
 
     '''
     Train model
@@ -374,7 +224,8 @@ def train(train_image_path,
 
     log('Begin training...', log_path)
     for epoch in range(1, learning_schedule[-1] + 1):
-
+    # for epoch in tqdm(range(1, learning_schedule[-1] + 1), desc="Training"):
+        
         # Set learning rate schedule
         if epoch > learning_schedule[learning_schedule_pos]:
             learning_schedule_pos = learning_schedule_pos + 1
@@ -398,13 +249,10 @@ def train(train_image_path,
                 in_.to(device) for in_ in inputs
             ]
 
-            image0, image1, image2, sparse_depth0, intrinsics = inputs
+            image0, image1, image2, sparse_depth0, intrinsics = inputs  # (B, C, 320, 768)
 
             # Validity map is where sparse depth is available
-            validity_map_depth0 = torch.where(
-                sparse_depth0 > 0,
-                torch.ones_like(sparse_depth0),
-                sparse_depth0)
+            validity_map_depth0 = torch.where(sparse_depth0 > 0, torch.ones_like(sparse_depth0), sparse_depth0)
 
             # Remove outlier points and update sparse depth and validity map
             filtered_sparse_depth0, \
@@ -1025,272 +873,3 @@ def run(image_path,
                 ground_truth_path = os.path.join(ground_truth_dirpath, filename)
                 data_utils.save_depth(ground_truth[..., 0], ground_truth_path)
 
-
-'''
-Helper functions for logging
-'''
-def log_input_settings(log_path,
-                       n_batch=None,
-                       n_height=None,
-                       n_width=None,
-                       input_channels_image=settings.INPUT_CHANNELS_IMAGE,
-                       input_channels_depth=settings.INPUT_CHANNELS_DEPTH,
-                       normalized_image_range=settings.NORMALIZED_IMAGE_RANGE,
-                       outlier_removal_kernel_size=settings.OUTLIER_REMOVAL_KERNEL_SIZE,
-                       outlier_removal_threshold=settings.OUTLIER_REMOVAL_THRESHOLD):
-
-    batch_settings_text = ''
-    batch_settings_vars = []
-
-    if n_batch is not None:
-        batch_settings_text = batch_settings_text + 'n_batch={}'
-        batch_settings_vars.append(n_batch)
-
-    batch_settings_text = \
-        batch_settings_text + '  ' if len(batch_settings_text) > 0 else batch_settings_text
-
-    if n_height is not None:
-        batch_settings_text = batch_settings_text + 'n_height={}'
-        batch_settings_vars.append(n_height)
-
-    batch_settings_text = \
-        batch_settings_text + '  ' if len(batch_settings_text) > 0 else batch_settings_text
-
-    if n_width is not None:
-        batch_settings_text = batch_settings_text + 'n_width={}'
-        batch_settings_vars.append(n_width)
-
-    log('Input settings:', log_path)
-
-    if len(batch_settings_vars) > 0:
-        log(batch_settings_text.format(*batch_settings_vars),
-            log_path)
-
-    log('input_channels_image={}  input_channels_depth={}'.format(
-        input_channels_image, input_channels_depth),
-        log_path)
-    log('normalized_image_range={}'.format(normalized_image_range),
-        log_path)
-    log('outlier_removal_kernel_size={}  outlier_removal_threshold={:.2f}'.format(
-        outlier_removal_kernel_size, outlier_removal_threshold),
-        log_path)
-    log('', log_path)
-
-def log_network_settings(log_path,
-                         # Sparse to dense pool settings
-                         min_pool_sizes_sparse_to_dense_pool,
-                         max_pool_sizes_sparse_to_dense_pool,
-                         n_convolution_sparse_to_dense_pool,
-                         n_filter_sparse_to_dense_pool,
-                         # Depth network settings
-                         n_filters_encoder_image,
-                         n_filters_encoder_depth,
-                         resolutions_backprojection,
-                         n_filters_decoder,
-                         deconv_type,
-                         min_predict_depth,
-                         max_predict_depth,
-                         # Weight settings
-                         weight_initializer,
-                         activation_func,
-                         parameters_depth_model=[],
-                         parameters_pose_model=[]):
-
-    # Computer number of parameters
-    n_parameter_depth = sum(p.numel() for p in parameters_depth_model)
-    n_parameter_pose = sum(p.numel() for p in parameters_pose_model)
-
-    n_parameter = n_parameter_depth + n_parameter_pose
-
-    n_parameter_text = 'n_parameter={}'.format(n_parameter)
-    n_parameter_vars = []
-
-    if n_parameter_depth > 0 :
-        n_parameter_text = n_parameter_text + 'n_parameter_depth={}'
-        n_parameter_vars.append(n_parameter_depth)
-
-    n_parameter_text = \
-        n_parameter_text + '  ' if len(n_parameter_text) > 0 else n_parameter_text
-
-    if n_parameter_pose > 0 :
-        n_parameter_text = n_parameter_text + 'n_parameter_pose={}'
-        n_parameter_vars.append(n_parameter_pose)
-
-    n_parameter_text = \
-        n_parameter_text + '  ' if len(n_parameter_text) > 0 else n_parameter_text
-
-    log('Sparse to dense pooling settings:', log_path)
-    log('min_pool_sizes_sparse_to_dense_pool={}'.format(min_pool_sizes_sparse_to_dense_pool),
-        log_path)
-    log('max_pool_sizes_sparse_to_dense_pool={}'.format(max_pool_sizes_sparse_to_dense_pool),
-        log_path)
-    log('n_convolution_sparse_to_dense_pool={}'.format(n_convolution_sparse_to_dense_pool),
-        log_path)
-    log('n_filter_sparse_to_dense_pool={}'.format(n_filter_sparse_to_dense_pool),
-        log_path)
-    log('', log_path)
-
-    log('Depth network settings:', log_path)
-    log('n_filters_encoder_image={}'.format(n_filters_encoder_image),
-        log_path)
-    log('n_filters_encoder_depth={}'.format(n_filters_encoder_depth),
-        log_path)
-    log('resolutions_backprojection={}'.format(resolutions_backprojection),
-        log_path)
-    log('n_filters_decoder={}'.format(n_filters_decoder),
-        log_path)
-    log('deconv_type={}'.format(deconv_type),
-        log_path)
-    log('min_predict_depth={:.2f}  max_predict_depth={:.2f}'.format(
-        min_predict_depth, max_predict_depth),
-        log_path)
-    log('', log_path)
-
-    log('Weight settings:', log_path)
-    log('n_parameter={}  n_parameter_depth={}  n_parameter_pose={}'.format(
-        n_parameter, n_parameter_depth, n_parameter_pose),
-        log_path)
-    log('weight_initializer={}  activation_func={}'.format(
-        weight_initializer, activation_func),
-        log_path)
-    log('', log_path)
-
-def log_training_settings(log_path,
-                          # Training settings
-                          n_batch,
-                          n_train_sample,
-                          n_train_step,
-                          learning_rates,
-                          learning_schedule,
-                          # Augmentation settings
-                          augmentation_probabilities,
-                          augmentation_schedule,
-                          augmentation_random_crop_type,
-                          augmentation_random_flip_type,
-                          augmentation_random_remove_points,
-                          augmentation_random_noise_type,
-                          augmentation_random_noise_spread):
-
-    log('Training settings:', log_path)
-    log('n_sample={}  n_epoch={}  n_step={}'.format(
-        n_train_sample, learning_schedule[-1], n_train_step),
-        log_path)
-    log('learning_schedule=[%s]' %
-        ', '.join('{}-{} : {}'.format(
-            ls * (n_train_sample // n_batch), le * (n_train_sample // n_batch), v)
-            for ls, le, v in zip([0] + learning_schedule[:-1], learning_schedule, learning_rates)),
-        log_path)
-    log('', log_path)
-
-    log('Augmentation settings:', log_path)
-    log('augmentation_schedule=[%s]' %
-        ', '.join('{}-{} : {}'.format(
-            ls * (n_train_sample // n_batch), le * (n_train_sample // n_batch), v)
-            for ls, le, v in zip([0] + augmentation_schedule[:-1], augmentation_schedule, augmentation_probabilities)),
-        log_path)
-    log('augmentation_random_crop_type={}'.format(augmentation_random_crop_type),
-        log_path)
-    log('augmentation_random_flip_type={}'.format(augmentation_random_flip_type),
-        log_path)
-    log('augmentation_random_remove_points={}'.format(augmentation_random_remove_points),
-        log_path)
-    log('augmentation_random_noise_type={}  augmentation_random_noise_spread={}'.format(
-        augmentation_random_noise_type, augmentation_random_noise_spread),
-        log_path)
-    log('', log_path)
-
-def log_loss_func_settings(log_path,
-                           # Loss function settings
-                           w_color,
-                           w_structure,
-                           w_sparse_depth,
-                           w_smoothness,
-                           w_weight_decay_depth,
-                           w_weight_decay_pose):
-
-    log('Loss function settings:', log_path)
-    log('w_color={:.1e}  w_structure={:.1e}  w_sparse_depth={:.1e}'.format(
-        w_color, w_structure, w_sparse_depth),
-        log_path)
-    log('w_smoothness={:.1e}'.format(w_smoothness),
-        log_path)
-    log('w_weight_decay_depth={:.1e}  w_weight_decay_pose={:.1e}'.format(
-        w_weight_decay_depth, w_weight_decay_pose),
-        log_path)
-    log('', log_path)
-
-def log_evaluation_settings(log_path,
-                            min_evaluate_depth,
-                            max_evaluate_depth):
-
-    log('Evaluation settings:', log_path)
-    log('min_evaluate_depth={:.2f}  max_evaluate_depth={:.2f}'.format(
-        min_evaluate_depth, max_evaluate_depth),
-        log_path)
-    log('', log_path)
-
-def log_system_settings(log_path,
-                        # Checkpoint settings
-                        checkpoint_path,
-                        n_checkpoint=None,
-                        summary_event_path=None,
-                        n_summary=None,
-                        n_summary_display=None,
-                        validation_start_step=None,
-                        depth_model_restore_path=None,
-                        pose_model_restore_path=None,
-                        # Hardware settings
-                        device=torch.device('cuda'),
-                        n_thread=8):
-
-    log('Checkpoint settings:', log_path)
-
-    if checkpoint_path is not None:
-        log('checkpoint_path={}'.format(checkpoint_path), log_path)
-
-        if n_checkpoint is not None:
-            log('checkpoint_save_frequency={}'.format(n_checkpoint), log_path)
-
-        if validation_start_step is not None:
-            log('validation_start_step={}'.format(validation_start_step), log_path)
-
-        log('', log_path)
-
-        summary_settings_text = ''
-        summary_settings_vars = []
-
-    if summary_event_path is not None:
-        log('Tensorboard settings:', log_path)
-        log('event_path={}'.format(summary_event_path), log_path)
-
-    if n_summary is not None:
-        summary_settings_text = summary_settings_text + 'log_summary_frequency={}'
-        summary_settings_vars.append(n_summary)
-
-        summary_settings_text = \
-            summary_settings_text + '  ' if len(summary_settings_text) > 0 else summary_settings_text
-
-    if n_summary_display is not None:
-        summary_settings_text = summary_settings_text + 'n_summary_display={}'
-        summary_settings_vars.append(n_summary_display)
-
-        summary_settings_text = \
-            summary_settings_text + '  ' if len(summary_settings_text) > 0 else summary_settings_text
-
-    if len(summary_settings_text) > 0:
-        log(summary_settings_text.format(*summary_settings_vars), log_path)
-
-    if depth_model_restore_path is not None and depth_model_restore_path != '':
-        log('depth_model_restore_path={}'.format(depth_model_restore_path),
-            log_path)
-
-    if pose_model_restore_path is not None and pose_model_restore_path != '':
-        log('pose_model_restore_path={}'.format(pose_model_restore_path),
-            log_path)
-
-    log('', log_path)
-
-    log('Hardware settings:', log_path)
-    log('device={}'.format(device.type), log_path)
-    log('n_thread={}'.format(n_thread), log_path)
-    log('', log_path)

@@ -1774,26 +1774,19 @@ class OutlierRemoval(object):
 
         # Replace all zeros with large values
         max_value = 10 * torch.max(sparse_depth)
-        sparse_depth_max_filled = torch.where(
-            validity_map <= 0,
-            torch.full_like(sparse_depth, fill_value=max_value),
-            sparse_depth)
+        sparse_depth_max_filled = torch.where(validity_map <= 0, torch.full_like(sparse_depth, fill_value=max_value), sparse_depth)
 
         # For each neighborhood find the smallest value
         padding = self.kernel_size // 2
-        sparse_depth_max_filled = torch.nn.functional.pad(
-            input=sparse_depth_max_filled,
-            pad=(padding, padding, padding, padding),
-            mode='constant',
-            value=max_value)
+        sparse_depth_max_filled = torch.nn.functional.pad(input=sparse_depth_max_filled, pad=(padding, padding, padding, padding), mode='constant', value=max_value)    # 对边界进行填充
 
         min_values = -torch.nn.functional.max_pool2d(
             input=-sparse_depth_max_filled,
             kernel_size=self.kernel_size,
             stride=1,
-            padding=0)
+            padding=0)  # 与原sparse_depth形状相同
 
-        # If measurement differs a lot from minimum value then remove
+        # If measurement differs a lot from minimum value then remove 删除与邻域最小值相差太大的点
         validity_map_clean = torch.where(
             min_values < sparse_depth - self.threshold,
             torch.zeros_like(validity_map),
