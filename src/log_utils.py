@@ -51,17 +51,17 @@ def colorize(T, colormap='magma'):
 
     Arg(s):
         T : torch.Tensor[float32]
-            1-channel tensor
+            1-channel tensor (b, 1, h, w)
         colormap : str
             matplotlib colormap
     '''
 
     cm = plt.cm.get_cmap(colormap)
-    shape = T.shape
+    shape = T.shape 
 
     # Convert to numpy array and transpose
     if shape[0] > 1:
-        T = np.squeeze(np.transpose(T.cpu().numpy(), (0, 2, 3, 1)))
+        T = np.squeeze(np.transpose(T.cpu().numpy(), (0, 2, 3, 1)))     # (b, h, w, c)
     else:
         T = np.squeeze(np.transpose(T.cpu().numpy(), (0, 2, 3, 1)), axis=-1)
 
@@ -72,4 +72,4 @@ def colorize(T, colormap='magma'):
     color = np.transpose(color, (0, 3, 1, 2))
 
     # Convert back to tensor
-    return torch.from_numpy(color.astype(np.float32))
+    return torch.from_numpy(color.astype(np.float32))   # (b, 3, h, w)

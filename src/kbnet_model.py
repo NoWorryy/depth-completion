@@ -482,7 +482,7 @@ class KBNetModel(object):
                     torch.cat([
                         image0_summary.cpu(),
                         torch.zeros_like(image0_summary, device=torch.device('cpu'))],
-                        dim=-1))
+                        dim=-1))    # (b, c, h, 2w)
 
                 display_summary_depth.append(display_summary_image[-1])
 
@@ -634,7 +634,7 @@ class KBNetModel(object):
 
         # Log image summaries to tensorboard
         if len(display_summary_image) > 1:
-            display_summary_image = torch.cat(display_summary_image, dim=2)
+            display_summary_image = torch.cat(display_summary_image, dim=2) # (b, c, 3h, 2w)
 
             summary_writer.add_image(
                 display_summary_image_text,

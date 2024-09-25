@@ -127,8 +127,8 @@ def train(device: str,
 
         ground_truths = []
         for path in val_ground_truth_paths:
-            ground_truth, validity_map = data_utils.load_depth_with_validity_map(path)
-            ground_truths.append(np.stack([ground_truth, validity_map], axis=-1))
+            ground_truth, validity_map = data_utils.load_depth_with_validity_map(path)  # (352, 1216)
+            ground_truths.append(np.stack([ground_truth, validity_map], axis=-1))       
 
         val_dataloader = torch.utils.data.DataLoader(
             datasets.KBNetInferenceDataset(
@@ -401,8 +401,8 @@ def validate(depth_model,
 
         image, sparse_depth, intrinsics = inputs
 
-        ground_truth = np.expand_dims(ground_truth, axis=0)
-        ground_truth = np.transpose(ground_truth, (0, 3, 1, 2))
+        ground_truth = np.expand_dims(ground_truth, axis=0)     # (1, h, w, 2)
+        ground_truth = np.transpose(ground_truth, (0, 3, 1, 2)) # (1, 2, h, w)
         ground_truth = torch.from_numpy(ground_truth).to(device)
 
         # Validity map is where sparse depth is available
@@ -441,7 +441,7 @@ def validate(depth_model,
 
         # Convert to numpy to validate
         output_depth = np.squeeze(output_depth.cpu().numpy())
-        ground_truth = np.squeeze(ground_truth.cpu().numpy())
+        ground_truth = np.squeeze(ground_truth.cpu().numpy())   # (2, h, w)
 
         validity_map = ground_truth[1, :, :]
         ground_truth = ground_truth[0, :, :]
