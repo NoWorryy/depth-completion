@@ -68,17 +68,14 @@ train_params:
   restore_path: null
 
 
-dataset_params:
+dataset_train_params:
   shape: [320, 768, 3]
+  
   # Training and validation input filepaths
-  file_paths:
-    train_image_path: 'training/kitti/kitti_train_image-clean.txt'
-    train_sparse_depth_path: 'training/kitti/kitti_train_sparse_depth-clean.txt' 
-    train_intrinsics_path: 'training/kitti/kitti_train_intrinsics-clean.txt' 
-    val_image_path: 'validation/kitti/kitti_val_image.txt' 
-    val_sparse_depth_path: 'validation/kitti/kitti_val_sparse_depth.txt' 
-    val_intrinsics_path: 'validation/kitti/kitti_val_intrinsics.txt' 
-    val_ground_truth_path: 'validation/kitti/kitti_val_ground_truth.txt' 
+  train_image_path: 'training/kitti/kitti_train_image-clean.txt'
+  train_sparse_depth_path: 'training/kitti/kitti_train_sparse_depth-clean.txt' 
+  train_intrinsics_path: 'training/kitti/kitti_train_intrinsics-clean.txt' 
+  
 
   aug_params:
     # Augmentation settings
@@ -95,6 +92,11 @@ dataset_val_params:
   val_image_paths: 
   val_sparse_depth_paths:
   val_intrinsics_paths:
+
+  val_image_path: 'validation/kitti/kitti_val_image.txt' 
+  val_sparse_depth_path: 'validation/kitti/kitti_val_sparse_depth.txt' 
+  val_intrinsics_path: 'validation/kitti/kitti_val_intrinsics.txt' 
+  val_ground_truth_path: 'validation/kitti/kitti_val_ground_truth.txt' 
   
   
 
