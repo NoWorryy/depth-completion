@@ -13,8 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 import datetime
 import datasets
 from kbnet import train
-from kbnet_model import KBNetModel
-from posenet_model import PoseNetModel
+from transforms import Transforms
 from train_net import Train_net
 
 from log_utils import log, colorize
@@ -75,7 +74,6 @@ def main(device: str,
                         train_params = train_params,
                         output_params = output_params,
                         pretrained_weights = pretrained_weights)
-    
 
     # training
     train_data_length = len(dataloader)
@@ -83,12 +81,17 @@ def main(device: str,
     max_epoch = train_params['learning_schedule'][-1]
     max_train_steps = max_epoch * train_data_length
     global_step = trainer.iter
+    
     progress_bar = tqdm(range(global_step, max_train_steps))
     progress_bar.set_description("Steps")
 
     logger.info(f'Begin training ------ train data length:{train_data_length}, max epoch:{max_epoch}, start_epoch:{start_epoch}')
     for epoch in range(start_epoch, max_epoch):
         logger.info(f'================> current epoch: {epoch}')
+        # Set augmentation schedule
+        if epoch > train_params['augmentation_schedule'][trainer.augmentation_schedule_pos]:    # [50, 55, 60]
+            trainer.augmentation_schedule_pos = trainer.augmentation_schedule_pos + 1
+            trainer.augmentation_probability = train_params['augmentation_probabilities'][trainer.augmentation_schedule_pos]
 
         for step, inputs in enumerate(dataloader):
             

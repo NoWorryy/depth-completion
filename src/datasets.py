@@ -1,77 +1,12 @@
-'''
-Author: Alex Wong <alexw@cs.ucla.edu>
-
-If you use this code, please cite the following paper:
-
-A. Wong, and S. Soatto. Unsupervised Depth Completion with Calibrated Backprojection Layers.
-https://arxiv.org/pdf/2108.10531.pdf
-
-@inproceedings{wong2021unsupervised,
-  title={Unsupervised Depth Completion with Calibrated Backprojection Layers},
-  author={Wong, Alex and Soatto, Stefano},
-  booktitle={Proceedings of the IEEE/CVF International Conference on Computer Vision},
-  pages={12747--12756},
-  year={2021}
-}
-'''
 import numpy as np
 import torch.utils.data
 import data_utils
+from torchvision import transforms
+from PIL import Image
+import json
 
 
-def load_image_triplet(path, normalize=True):
-    '''
-    Load images from image triplet
-
-    Arg(s):
-        path : str
-            path to image triplet
-        normalize : bool
-            if set, normalize by to [0, 1] range
-    Return:
-        numpy[float32] : image at time t (C x H x W)
-        numpy[float32] : image at time t-1 (C x H x W)
-        numpy[float32] : image at time t+1 (C x H x W)
-    '''
-
-    # Load image triplet and split into images at t-1, t, t+1
-    images = data_utils.load_image(
-        path,
-        normalize=normalize,
-        data_format='CHW')
-
-    # Split along width
-    image1, image0, image2 = np.split(images, indices_or_sections=3, axis=-1)
-
-    return image1, image0, image2
-
-def load_depth(depth_path):
-    '''
-    Load depth
-
-    Arg(s):
-        depth_path : str
-            path to depth map
-    Return:
-        numpy[float32] : depth map (1 x H x W)
-    '''
-
-    return data_utils.load_depth(depth_path, data_format='CHW')
-
-def load_validity_map(validity_map_path):
-    '''
-    Load validity map
-
-    Arg(s):
-        validity_map_path : str
-            path to validity map
-    Returns:
-        numpy[float32] : validity map (1 x H x W)
-    '''
-
-    return data_utils.load_validity_map(validity_map_path, data_format='CHW')
-
-def random_crop(inputs, shape, intrinsics=None, crop_type=['none']):
+def random_crop(inputs, shape, intrinsics=None, RandCrop = False, tp_min=50):
     '''
     Apply crop to inputs e.g. images, depth and if available adjust camera intrinsics
 
@@ -89,69 +24,29 @@ def random_crop(inputs, shape, intrinsics=None, crop_type=['none']):
         numpy[float32] : if given, 3 x 3 adjusted camera intrinsics matrix
     '''
 
-    n_height, n_width = shape
-    _, o_height, o_width = inputs[0].shape
+    n_height, n_width, _ = shape
+    o_height, o_width, _ = inputs[0].shape
 
-    # Get delta of crop and original height and width
-    d_height = o_height - n_height
-    d_width = o_width - n_width
+    # bottom center crop
+    tp = o_height - n_height
+    lp = (o_width - n_width) // 2
 
-    # By default, perform center crop
-    y_start = d_height // 2
-    x_start = d_width // 2
-
-    if 'horizontal' in crop_type:
-
-        # Select from one of the pre-defined anchored locations
-        if 'anchored' in crop_type:
-            # Create anchor positions
-            crop_anchors = [
-                0.0, 0.50, 1.0
-            ]
-
-            widths = [
-                anchor * d_width for anchor in crop_anchors
-            ]
-            x_start = int(widths[np.random.randint(low=0, high=len(widths))])
-
-        # Randomly select a crop location
-        else:
-            x_start = np.random.randint(low=0, high=d_width)
-
-    # If bottom alignment, then set starting height to bottom position
-    if 'bottom' in crop_type:
-        y_start = d_height
-
-    elif 'vertical' in crop_type and np.random.rand() <= 0.30:
-
-        # Select from one of the pre-defined anchored locations
-        if 'anchored' in crop_type:
-            # Create anchor positions
-            crop_anchors = [
-                0.50, 1.0
-            ]
-
-            heights = [
-                anchor * d_height for anchor in crop_anchors
-            ]
-            y_start = int(heights[np.random.randint(low=0, high=len(heights))])
-
-        # Randomly select a crop location
-        else:
-            y_start = np.random.randint(low=0, high=d_height)
+    if RandCrop:
+        tp = np.random.randint(tp_min, tp)
+        lp = np.random.randint(0, o_width - n_width)
 
     # Crop each input into (n_height, n_width)
-    y_end = y_start + n_height
-    x_end = x_start + n_width
+    tp_end = tp + n_height
+    lp_end = lp + n_width
     outputs = [
-        T[:, y_start:y_end, x_start:x_end] for T in inputs
+        T[tp:tp_end, lp:lp_end, :] for T in inputs
     ]
 
     if intrinsics is not None:
         # Adjust intrinsics
-        intrinsics = intrinsics + [[0.0, 0.0, -x_start],
-                                   [0.0, 0.0, -y_start],
-                                   [0.0, 0.0, 0.0     ]]
+        intrinsics = intrinsics + [[0.0, 0.0, -lp],
+                                   [0.0, 0.0, -tp],
+                                   [0.0, 0.0, 0.0]]
 
         return outputs, intrinsics
     else:
@@ -179,50 +74,58 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
     '''
 
     def __init__(self,
-                 image_paths,
-                 sparse_depth_paths,
-                 intrinsics_paths,
+                 train_image_path,
+                 train_sparse_depth_path,
+                 train_intrinsics_path,
                  shape=None,
-                 random_crop_type=['none']):
-
-        self.image_paths = image_paths
-        self.sparse_depth_paths = sparse_depth_paths
-        self.intrinsics_paths = intrinsics_paths
+                 RandCrop=False):
+        
+        # Read paths for training
+        self.image_paths = data_utils.read_paths(train_image_path)     # kitti_train_image-clean.txt
+        self.sparse_depth_paths = data_utils.read_paths(train_sparse_depth_path)
+        self.intrinsics_paths = data_utils.read_paths(train_intrinsics_path)
 
         self.shape = shape
-        self.do_random_crop = \
-            self.shape is not None and all([x > 0 for x in self.shape])
+        self.RandCrop = RandCrop
+        self.transform = transforms.ToTensor()
 
-        # Augmentation
-        self.random_crop_type = random_crop_type
 
     def __getitem__(self, index):
         # Load image
-        image1, image0, image2 = load_image_triplet(
-            self.image_paths[index],
-            normalize=False)
+        # image1, image0, image2 = load_image_triplet(self.image_paths[index],normalize=False)
+        images = Image.open(self.image_paths[index]).convert('RGB')
+        images = np.array(images)   # (h, 3w, c)
+        image1, image0, image2 = np.split(images, indices_or_sections=3, axis=1)   # (h, w, c)
 
         # Load depth
-        sparse_depth0 = load_depth(self.sparse_depth_paths[index])
+        # sparse_depth0 = data_utils.load_depth(self.sparse_depth_paths[index], data_format='CHW')
+        z = np.array(Image.open(self.sparse_depth_paths[index]), dtype=np.float32)
+        z = z / 256.0   # Assert 16-bit (not 8-bit) depth map
+        z[z <= 0] = 0.0
+        sparse_depth0 = np.expand_dims(z, axis=-1)  # (h,w,c)
+
 
         # Load camera intrinsics
         intrinsics = np.load(self.intrinsics_paths[index]).astype(np.float32)
 
         # Crop image, depth and adjust intrinsics
-        if self.do_random_crop:
+        if self.RandCrop:
             [image0, image1, image2, sparse_depth0], intrinsics = random_crop(
                 inputs=[image0, image1, image2, sparse_depth0],
                 shape=self.shape,
                 intrinsics=intrinsics,
-                crop_type=self.random_crop_type)
+                RandCrop=self.RandCrop)
+        
+        # validity_map_depth0 = torch.where(sparse_depth0 > 0, torch.ones_like(sparse_depth0), torch.zeros_like(sparse_depth0))
+        inputs = {
+            'image0': self.transform(image0),   # 0~1 （）
+            'image1': self.transform(image1),
+            'image2': self.transform(image1),
+            'sparse_depth0': self.transform(sparse_depth0), # 真实值
+            'intrinsics': intrinsics
+        }
 
-        # Convert to float32
-        image0, image1, image2, sparse_depth0, intrinsics = [
-            T.astype(np.float32)
-            for T in [image0, image1, image2, sparse_depth0, intrinsics]
-        ]
-
-        return image0, image1, image2, sparse_depth0, intrinsics
+        return inputs
 
     def __len__(self):
         return len(self.image_paths)
@@ -245,42 +148,77 @@ class KBNetInferenceDataset(torch.utils.data.Dataset):
     '''
 
     def __init__(self,
-                 image_paths,
-                 sparse_depth_paths,
-                 intrinsics_paths,
-                 use_image_triplet=True):
+                 val_file_path,
+                 min_evaluate_depth,
+                 max_evaluate_depth):
 
-        self.image_paths = image_paths
-        self.sparse_depth_paths = sparse_depth_paths
-        self.intrinsics_paths = intrinsics_paths
+        # Read paths for training
+        with open(val_file_path, 'r') as file:
+            self.dataset = json.load(file)
 
-        self.use_image_triplet = use_image_triplet
+        self.min_evaluate_depth = min_evaluate_depth
+        self.max_evaluate_depth = max_evaluate_depth
+        self.transform = transforms.ToTensor()
+
 
     def __getitem__(self, index):
+        entry = self.dataset[index]
+
         # Load image
-        if self.use_image_triplet:
-            _, image, _ = load_image_triplet(
-                self.image_paths[index],
-                normalize=False)
-        else:
-            image = data_utils.load_image(
-                self.image_paths[index],
-                normalize=False,
-                data_format='CHW')
+        image = Image.open(entry['image']).convert('RGB')
+        image = np.array(image)   # (h, w, c) 整型
 
         # Load depth
-        sparse_depth = load_depth(self.sparse_depth_paths[index])
+        z = np.array(Image.open(entry['sparse_depth']), dtype=np.float32)
+        z = z / 256.0   # Assert 16-bit (not 8-bit) depth map
+        z[z <= 0] = 0.0
+        sparse_depth = np.expand_dims(z, axis=-1)  # (h,w,c)
+        v = z.astype(np.float32)
+        v[z > 0] = 1.0
+        validity_map_depth = np.expand_dims(v, axis=-1)  # (h,w,c)
 
         # Load camera intrinsics
-        intrinsics = np.load(self.intrinsics_paths[index]).astype(np.float32)
+        intrinsics = np.reshape(np.loadtxt(entry['intrinsic']), (3, 3))
 
-        # Convert to float32
-        image, sparse_depth, intrinsics = [
-            T.astype(np.float32)
-            for T in [image, sparse_depth, intrinsics]
-        ]
+        # load gt
+        z = np.array(Image.open(entry['gt']), dtype=np.float32)
+        z = z / 256.0   # Assert 16-bit (not 8-bit) depth map
+        z[z <= 0] = 0.0
+        ground_truth = np.expand_dims(z, axis=-1)  # (h,w,c)
+        v = z.astype(np.float32)
+        v[z > 0] = 1.0
+        validity_map_gt = np.expand_dims(v, axis=-1)  # (h,w,c)
 
-        return image, sparse_depth, intrinsics
+        gt_mask = (ground_truth > self.min_evaluate_depth) & (ground_truth < self.max_evaluate_depth) & validity_map_gt.astype(bool)
+
+        inputs = {
+            'image': self.transform(image),
+            'sparse_depth': self.transform(sparse_depth),
+            'intrinsics': intrinsics,
+            'validity_map_depth': self.transform(validity_map_depth),
+            'ground_truth': self.transform(ground_truth),
+            'gt_mask': gt_mask.transpose(2, 0, 1)
+        }
+
+        return inputs
 
     def __len__(self):
-        return len(self.image_paths)
+        return len(self.dataset)
+        # return len(self.image_paths)
+    
+
+    
+if __name__ == '__main__':
+    from omegaconf import OmegaConf
+    cfg_path = '/media/data2/libihan/codes/calibrated-backprojection-network/configs/kitti_train.yaml'
+
+    args = OmegaConf.load(cfg_path)
+    print(args['dataset_train_params'])
+    
+    # dataset = KBNetTrainingDataset(**args['dataset_train_params'])
+    dataset = KBNetInferenceDataset(**args['dataset_val_params'])
+    print(len(dataset))
+
+    for i in range(len(dataset)):
+        inputs = dataset[i]
+        

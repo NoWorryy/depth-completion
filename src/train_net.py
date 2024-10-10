@@ -13,6 +13,7 @@ from torch.autograd import grad
 from kbnet_model import KBNetModel
 from posenet_model import PoseNetModel
 from net_utils import OutlierRemoval
+from transforms import Transforms
 import losses, networks, net_utils, eval_utils
 
 
@@ -28,18 +29,16 @@ class Train_net(torch.nn.Module):
         self.output_params = output_params
         self.train_params = train_params
         self.pretrained_weights = pretrained_weights
-
         self.device = device
 
+        self.augmentation_schedule_pos = 0
+        self.augmentation_probability = train_params['augmentation_probabilities'][0]
 
         # 模型初始化
         logger.info('Initializing models:')
         self.depth_model = KBNetModel(**model_params['depth_model_params'])
         self.pose_net = PoseNetModel(**model_params['pose_net_params'])
         self.outlier_removal = OutlierRemoval(**model_params['outlier_params'])
-
-        # if pretrained_weights is not None:
-        #     self.load_ckpt(pretrained_weights)
 
         self.depth_model.to(self.device)
         self.pose_net.to(self.device)
@@ -68,9 +67,10 @@ class Train_net(torch.nn.Module):
 
         # loss权重配置及模型加载
         self.loss_weights = train_params['loss_weights']
-
-   
         self.iter = self.load_ckpt(pretrained_weights) if pretrained_weights is not None else 0
+        logger.info('Ckpt loaded.')
+
+        self.train_transforms = Transforms(**train_params['aug_params'])
 
     def train(self, inputs):
         """
@@ -101,6 +101,17 @@ class Train_net(torch.nn.Module):
         filtered_sparse_depth0, filtered_validity_map_depth0 = self.outlier_removal.remove_outliers(
                 sparse_depth=sparse_depth0,
                 validity_map=validity_map_depth0)
+        
+        # Do data augmentation
+        trans_outputs = self.train_transforms.transform(
+                images_arr = [image0, image1, image2],
+                range_maps_arr = [sparse_depth0],
+                validity_maps_arr = [filtered_sparse_depth0, filtered_validity_map_depth0],
+                random_transform_probability = self.augmentation_probability)
+        
+        [image0, image1, image2] = trans_outputs['images_arr']
+        [sparse_depth0] = trans_outputs['range_maps_arr']
+        [filtered_sparse_depth0, filtered_validity_map_depth0] = trans_outputs['validity_maps_arr']
         
         # Forward through the network
         output_depth0 = self.depth_model.forward(

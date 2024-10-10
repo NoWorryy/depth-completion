@@ -1,4 +1,3 @@
-
 model_params:
   depth_model_params:
     n_filters_encoder_image: [48, 96, 192, 384, 384] 
@@ -15,7 +14,7 @@ model_params:
       # Input settings
       input_channels_image: 3 
       input_channels_depth: 2 
-      normalized_image_range: [0, 1]
+    
 
     pool_params:
       # Sparse to dense pool settings
@@ -35,21 +34,17 @@ model_params:
       outlier_removal_threshold: 1.5 
 
 
-
-
 # Training settings
 train_params:
   n_batch: 24 
-  n_height: 320 
-  n_width: 768 
+  n_height: 256
+  n_width: 1216
   n_thread: 8
   device: 'gpu'
   lr_depth: 2.0e-4
   lr_pose: 2.0e-4
   # learning_rates: [0.5e-4, 1.0e-4, 1.5e-4, 1.0e-4, 5.0e-5, 2.0e-5] # 对应epoch
   learning_schedule: [2, 30, 45, 60]
-  min_evaluate_depth: 0.0 
-  max_evaluate_depth: 100.0 
 
   loss_weights:
     # Loss function settings
@@ -67,42 +62,36 @@ train_params:
   validation_start_step: 100000
   restore_path: null
 
+  augmentation_probabilities: [1.00, 0.50, 0.25]
+  augmentation_schedule: [50, 55, 60]
+
+  aug_params:
+    # normalized_image_range: [0, 1]
+    random_flip_type: []
+    random_remove_points: [0.60, 0.70]  # how much to remove from each sample
+    random_noise_type: []
+    random_noise_spread: -1
+
 
 dataset_train_params:
-  shape: [320, 768, 3]
-  
-  # Training and validation input filepaths
+  shape: [256, 1216, 3]
+  RandCrop: true
+
   train_image_path: 'training/kitti/kitti_train_image-clean.txt'
   train_sparse_depth_path: 'training/kitti/kitti_train_sparse_depth-clean.txt' 
   train_intrinsics_path: 'training/kitti/kitti_train_intrinsics-clean.txt' 
-  
-
-  aug_params:
-    # Augmentation settings
-    augmentation_probabilities: [1.00, 0.50, 0.25] 
-    augmentation_schedule: [50, 55, 60]
-    augmentation_random_crop_type: ['horizontal', 'vertical', 'anchored', 'bottom']
-    augmentation_random_flip_type: ['None']
-    augmentation_random_remove_points: [0.60, 0.70]
-    augmentation_random_noise_type: null
-    augmentation_random_noise_spread: -1
 
 
 dataset_val_params:
-  val_image_paths: 
-  val_sparse_depth_paths:
-  val_intrinsics_paths:
+  val_file_path: 'validation/val_file_path.json'
+  # val_image_path: 'validation/kitti/kitti_val_image.txt'
+  # val_sparse_depth_path: 'validation/kitti/kitti_val_sparse_depth.txt'
+  # val_intrinsics_path: 'validation/kitti/kitti_val_intrinsics.txt'
+  # val_ground_truth_path: 'validation/kitti/kitti_val_ground_truth.txt'
 
-  val_image_path: 'validation/kitti/kitti_val_image.txt' 
-  val_sparse_depth_path: 'validation/kitti/kitti_val_sparse_depth.txt' 
-  val_intrinsics_path: 'validation/kitti/kitti_val_intrinsics.txt' 
-  val_ground_truth_path: 'validation/kitti/kitti_val_ground_truth.txt' 
-  
-  
+  min_evaluate_depth: 0.0 
+  max_evaluate_depth: 100.0 
+
 
 pretrained_weights:
   model_path: 
-
-
-
-
