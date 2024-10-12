@@ -4,9 +4,6 @@ import itertools
 import numpy as np
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torchvision import models, transforms
 from torch.optim.lr_scheduler import MultiStepLR
 from torch.autograd import grad
 
@@ -14,7 +11,7 @@ from kbnet_model import KBNetModel
 from posenet_model import PoseNetModel
 from net_utils import OutlierRemoval
 from transforms import Transforms
-import losses, networks, net_utils, eval_utils
+import losses, net_utils, eval_utils
 
 
 class Train_net(torch.nn.Module):
@@ -22,11 +19,10 @@ class Train_net(torch.nn.Module):
     Merge all generator related updates into single model for better multi-gpu usage
     """
 
-    def __init__(self, device, model_params, train_params, output_params, pretrained_weights=None):
+    def __init__(self, device, model_params, train_params, pretrained_weights=None):
         super(Train_net, self).__init__()
 
         self.model_params = model_params
-        self.output_params = output_params
         self.train_params = train_params
         self.pretrained_weights = pretrained_weights
         self.device = device
@@ -42,7 +38,6 @@ class Train_net(torch.nn.Module):
 
         self.depth_model.to(self.device)
         self.pose_net.to(self.device)
-        self.outlier_removal.to(self.device)
         logger.info('Models initialized.')
 
 
@@ -50,7 +45,7 @@ class Train_net(torch.nn.Module):
         logger.info('Initializing optimizers:')
         self.optimizer_depth_model = torch.optim.Adam(self.depth_model.parameters(), 
                                                       lr=train_params['lr_depth'], betas=(0.5, 0.999))
-        self.optimizer_pose_net = torch.optim.Adam(self.pose.parameters(),
+        self.optimizer_pose_net = torch.optim.Adam(self.pose_net.parameters(),
                                                    lr=train_params['lr_pose'], betas=(0.5, 0.999))
         logger.info('Optimizers initialized.')
 
@@ -67,7 +62,7 @@ class Train_net(torch.nn.Module):
 
         # loss权重配置及模型加载
         self.loss_weights = train_params['loss_weights']
-        self.iter = self.load_ckpt(pretrained_weights) if pretrained_weights is not None else 0
+        self.iter = self.load_ckpt(pretrained_weights)
         logger.info('Ckpt loaded.')
 
         self.train_transforms = Transforms(**train_params['aug_params'])
@@ -95,12 +90,13 @@ class Train_net(torch.nn.Module):
             inputs['image0'], inputs['image1'], inputs['image2'], inputs['sparse_depth0'], inputs['intrinsics']
 
         # Validity map is where sparse depth is available
-        validity_map_depth0 = torch.where(sparse_depth0 > 0, torch.ones_like(sparse_depth0), sparse_depth0)
+        validity_map_depth0 = torch.where(sparse_depth0 > 0, torch.ones_like(sparse_depth0), torch.zeros_like(sparse_depth0))
 
         # Remove outlier points and update sparse depth and validity map
         filtered_sparse_depth0, filtered_validity_map_depth0 = self.outlier_removal.remove_outliers(
                 sparse_depth=sparse_depth0,
                 validity_map=validity_map_depth0)
+                
         
         # Do data augmentation
         trans_outputs = self.train_transforms.transform(
@@ -116,7 +112,7 @@ class Train_net(torch.nn.Module):
         # Forward through the network
         output_depth0 = self.depth_model.forward(
             image=image0,
-            sparse_depth=sparse_depth0,
+            sparse_depth=sparse_depth0,     # Depth inputs to network: (1) raw sparse depth, (2) filtered validity map
             validity_map_depth=filtered_validity_map_depth0,
             intrinsics=intrinsics)
 
@@ -142,19 +138,8 @@ class Train_net(torch.nn.Module):
             'image02': image02
         }
 
-        # todo: 改参数
         # Compute loss function 
-        loss, loss_info = self.compute_loss(
-            image0=image0,
-            image1=image1,
-            image2=image2,
-            output_depth0=output_depth0,
-            sparse_depth0=filtered_sparse_depth0,
-            validity_map_depth0=filtered_validity_map_depth0,
-            intrinsics=intrinsics,
-            pose01=pose01,
-            pose02=pose02,
-            **self.train_params['loss_weights'])
+        loss, loss_info = self.compute_loss(image0, sparse_depth0, filtered_validity_map_depth0, generated, self.train_params['loss_weights'])
         
         loss.backward()
 
@@ -163,21 +148,8 @@ class Train_net(torch.nn.Module):
  
         return loss_info, generated
 
-    # todo 改参数 删掉计算image01/02
-    def compute_loss(self,
-                     image0,
-                     image1,
-                     image2,
-                     output_depth0,
-                     sparse_depth0,
-                     validity_map_depth0,
-                     intrinsics,
-                     pose01,
-                     pose02,
-                     w_color=0.15,
-                     w_structure=0.95,
-                     w_sparse_depth=0.60,
-                     w_smoothness=0.04):
+
+    def compute_loss(self, image0, sparse_depth0, filtered_validity_map_depth0, generated, loss_weights):
         '''
         Computes loss function
         l = w_{ph}l_{ph} + w_{sz}l_{sz} + w_{sm}l_{sm}
@@ -214,61 +186,32 @@ class Train_net(torch.nn.Module):
             dict[str, torch.Tensor[float32]] : dictionary of loss related tensors
         '''
 
-        shape = image0.shape
         validity_map_image0 = torch.ones_like(sparse_depth0)
-
-        # Backproject points to 3D camera coordinates
-        points = net_utils.backproject_to_camera(output_depth0, intrinsics, shape)
-
-        # Reproject points onto image 1 and image 2
-        target_xy01 = net_utils.project_to_pixel(points, pose01, intrinsics, shape)
-        target_xy02 = net_utils.project_to_pixel(points, pose02, intrinsics, shape)
-
-        # Reconstruct image0 from image1 and image2 by reprojection
-        image01 = net_utils.grid_sample(image1, target_xy01, shape)
-        image02 = net_utils.grid_sample(image2, target_xy02, shape)
 
         '''
         Essential loss terms
         '''
         # Color consistency loss function
-        loss_color01 = losses.color_consistency_loss_func(
-            src=image01,
-            tgt=image0,
-            w=validity_map_image0)
-        loss_color02 = losses.color_consistency_loss_func(
-            src=image02,
-            tgt=image0,
-            w=validity_map_image0)
+        loss_color01 = losses.color_consistency_loss_func(src=generated['image01'], tgt=image0, w=validity_map_image0)
+        loss_color02 = losses.color_consistency_loss_func(src=generated['image02'], tgt=image0, w=validity_map_image0)
         loss_color = loss_color01 + loss_color02
 
         # Structural consistency loss function
-        loss_structure01 = losses.structural_consistency_loss_func(
-            src=image01,
-            tgt=image0,
-            w=validity_map_image0)
-        loss_structure02 = losses.structural_consistency_loss_func(
-            src=image02,
-            tgt=image0,
-            w=validity_map_image0)
+        loss_structure01 = losses.structural_consistency_loss_func(src=generated['image01'], tgt=image0, w=validity_map_image0)
+        loss_structure02 = losses.structural_consistency_loss_func(src=generated['image02'], tgt=image0, w=validity_map_image0)
         loss_structure = loss_structure01 + loss_structure02
 
         # Sparse depth consistency loss function
-        loss_sparse_depth = losses.sparse_depth_consistency_loss_func(
-            src=output_depth0,
-            tgt=sparse_depth0,
-            w=validity_map_depth0)
+        loss_sparse_depth = losses.sparse_depth_consistency_loss_func(src=generated['output_depth0'], tgt=sparse_depth0, w=filtered_validity_map_depth0)
 
         # Local smoothness loss function
-        loss_smoothness = losses.smoothness_loss_func(
-            predict=output_depth0,
-            image=image0)
+        loss_smoothness = losses.smoothness_loss_func(predict=generated['output_depth0'], image=image0)
 
         # l = w_{ph}l_{ph} + w_{sz}l_{sz} + w_{sm}l_{sm}
-        loss = w_color * loss_color + \
-            w_structure * loss_structure + \
-            w_sparse_depth * loss_sparse_depth + \
-            w_smoothness * loss_smoothness
+        loss = loss_weights['w_color'] * loss_color + \
+               loss_weights['w_structure'] * loss_structure + \
+               loss_weights['w_sparse_depth'] * loss_sparse_depth + \
+               loss_weights['w_smoothness'] * loss_smoothness
 
         loss_info = {
             'loss' : loss,
@@ -290,24 +233,13 @@ class Train_net(torch.nn.Module):
         
         self.depth_model.eval()
         
-        output_depth = self.depth_model.forward(
+        output_depth_map = self.depth_model.forward(
             image=image,
             sparse_depth=sparse_depth,
             validity_map_depth=validity_map_depth,
             intrinsics=intrinsics)
 
-        # output_depth = np.squeeze(output_depth.cpu().numpy())   # (b, h, w)
-        # ground_truth = np.squeeze(ground_truth.cpu().numpy())   # (b, h, w)
-        # validity_map_gt = np.squeeze(validity_map_gt.cpu().numpy())
-
-        # Select valid regions to evaluate 放在dataset里
-        # validity_mask_gt = np.where(validity_map_gt > 0, 1, 0)
-        # min_max_mask = np.logical_and(
-        #     ground_truth > self.train_params['min_evaluate_depth'],
-        #     ground_truth < self.train_params['max_evaluate_depth'])
-        # mask = np.where(np.logical_and(validity_mask_gt, min_max_mask) > 0)
-
-        output_depth = output_depth[gt_mask].cpu().numpy()
+        output_depth = output_depth_map[gt_mask].cpu().numpy()
         ground_truth = ground_truth[gt_mask].cpu().numpy()
 
         # Compute validation metrics
@@ -318,9 +250,10 @@ class Train_net(torch.nn.Module):
         metrics['irmse'] = eval_utils.inv_root_mean_sq_err(0.001 * output_depth, 0.001 * ground_truth)
 
         generated = {}
-        generated['output_depth'] = output_depth
+        generated['output_depth'] = output_depth_map
 
         return metrics, generated
+
 
     def scheduler_epoch_step(self):
         self.scheduler_depth_model.step()
@@ -329,6 +262,7 @@ class Train_net(torch.nn.Module):
 
     def load_ckpt(self, pretrained_weights):
         # 加载预训练权重
+        iter = 0
         model_path = pretrained_weights.get('model_path', None)
         if model_path is not None:
             logger.info(f"load model checkpoint: {model_path}")

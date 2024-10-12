@@ -1,28 +1,23 @@
 model_params:
   depth_model_params:
+    input_channels_image: 3 
+    input_channels_depth: 2 
+
+    min_pool_sizes_sparse_to_dense_pool: [5, 7, 9, 11, 13]
+    max_pool_sizes_sparse_to_dense_pool: [15, 17]
+    n_convolution_sparse_to_dense_pool: 3  
+    n_filter_sparse_to_dense_pool: 8 
+
     n_filters_encoder_image: [48, 96, 192, 384, 384] 
     n_filters_encoder_depth: [16, 32, 64, 128, 128]
-    resolutions_backprojection: [0, 1, 2, 3]
     n_filters_decoder: [256, 128, 128, 64, 12] 
+    resolutions_backprojection: [0, 1, 2, 3]
     deconv_type: 'up'
-    min_predict_depth: 1.5
-    max_predict_depth: 100.0
     weight_initializer: 'xavier_normal'
     activation_func: 'leaky_relu'
+    min_predict_depth: 1.5
+    max_predict_depth: 100.0
 
-    input_params:
-      # Input settings
-      input_channels_image: 3 
-      input_channels_depth: 2 
-    
-
-    pool_params:
-      # Sparse to dense pool settings
-      min_pool_sizes_sparse_to_dense_pool: [5, 7, 9, 11, 13]
-      max_pool_sizes_sparse_to_dense_pool: [15, 17]
-      n_convolution_sparse_to_dense_pool: 3  
-      n_filter_sparse_to_dense_pool: 8 
-  
   pose_net_params:
     encoder_type: 'resnet18'
     rotation_parameterization: 'axis'
@@ -30,13 +25,13 @@ model_params:
     activation_func: 'relu'
   
   outlier_params:
-      outlier_removal_kernel_size: 7 
-      outlier_removal_threshold: 1.5 
+      kernel_size: 7 
+      threshold: 1.5 
 
 
 # Training settings
 train_params:
-  n_batch: 24 
+  n_batch: 20
   n_height: 256
   n_width: 1216
   n_thread: 8
@@ -64,7 +59,6 @@ train_params:
 
   augmentation_probabilities: [1.00, 0.50, 0.25]
   augmentation_schedule: [50, 55, 60]
-
   aug_params:
     # normalized_image_range: [0, 1]
     random_flip_type: []
@@ -84,10 +78,6 @@ dataset_train_params:
 
 dataset_val_params:
   val_file_path: 'validation/val_file_path.json'
-  # val_image_path: 'validation/kitti/kitti_val_image.txt'
-  # val_sparse_depth_path: 'validation/kitti/kitti_val_sparse_depth.txt'
-  # val_intrinsics_path: 'validation/kitti/kitti_val_intrinsics.txt'
-  # val_ground_truth_path: 'validation/kitti/kitti_val_ground_truth.txt'
 
   min_evaluate_depth: 0.0 
   max_evaluate_depth: 100.0 

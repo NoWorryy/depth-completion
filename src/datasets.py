@@ -122,7 +122,7 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
             'image1': self.transform(image1),
             'image2': self.transform(image1),
             'sparse_depth0': self.transform(sparse_depth0), # 真实值
-            'intrinsics': intrinsics
+            'intrinsics': intrinsics.astype(np.float32)
         }
 
         return inputs
@@ -194,7 +194,7 @@ class KBNetInferenceDataset(torch.utils.data.Dataset):
         inputs = {
             'image': self.transform(image),
             'sparse_depth': self.transform(sparse_depth),
-            'intrinsics': intrinsics,
+            'intrinsics': intrinsics.astype(np.float32),
             'validity_map_depth': self.transform(validity_map_depth),
             'ground_truth': self.transform(ground_truth),
             'gt_mask': gt_mask.transpose(2, 0, 1)
