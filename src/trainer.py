@@ -21,12 +21,22 @@ def write_loss(iteration, writer, losses_dict):
 
 
 def main(device: str,
-
+        
         dataset_train_params: dict,
         dataset_val_params: dict,
         model_params: dict,
         train_params: dict,
-        pretrained_weights: dict):
+        pretrained_weights: dict,
+        global_seed: int = 42 ):
+    
+    # rank = int(os.environ.get('RANK', '0'))
+    # num_gpus = torch.cuda.device_count()
+    # local_rank = rank % num_gpus
+    # torch.cuda.set_device(local_rank)
+    # device = torch.device(f"cuda:{local_rank}")
+
+    # seed = global_seed + int(rank)
+    # torch.manual_seed(seed)
 
 
     # output setting
@@ -67,14 +77,16 @@ def main(device: str,
                         train_params = train_params,
                         pretrained_weights = pretrained_weights)
 
-    trainer = torch.nn.DataParallel(trainer)
+    # trainer = torch.nn.DataParallel(trainer)
+    # trainer.accelerator.prepare()
+
 
     # training
     train_data_length = len(dataloader)     # 72400 --> 3017
-    start_epoch = trainer.module.iter // train_data_length
+    start_epoch = trainer.iter // train_data_length
     max_epoch = train_params['learning_schedule'][-1]
     max_train_steps = max_epoch * train_data_length
-    global_step = trainer.module.iter
+    global_step = trainer.iter
     
     progress_bar = tqdm(range(global_step, max_train_steps))
     progress_bar.set_description("Steps")
@@ -83,13 +95,13 @@ def main(device: str,
     for epoch in range(start_epoch, max_epoch):
         logger.info(f'================> current epoch: {epoch}')
         # Set augmentation schedule
-        if epoch > train_params['augmentation_schedule'][trainer.module.augmentation_schedule_pos]:    # [50, 55, 60]
-            trainer.module.augmentation_schedule_pos = trainer.module.augmentation_schedule_pos + 1
-            trainer.module.augmentation_probability = train_params['augmentation_probabilities'][trainer.module.augmentation_schedule_pos]
+        if epoch > train_params['augmentation_schedule'][trainer.augmentation_schedule_pos]:    # [50, 55, 60]
+            trainer.augmentation_schedule_pos = trainer.augmentation_schedule_pos + 1
+            trainer.augmentation_probability = train_params['augmentation_probabilities'][trainer.augmentation_schedule_pos]
 
         for step, inputs in enumerate(dataloader):
             
-            loss_info, generated = trainer.module.train(inputs)
+            loss_info, generated = trainer.train(inputs)
 
             losses = {key: value.mean().detach().data.cpu().numpy() for key, value in loss_info.items()}
             generated = {key: value.detach().cpu() for key, value in generated.items()}
@@ -103,7 +115,7 @@ def main(device: str,
 
 
             if (iteration % train_params['n_summary']) == 0:
-                trainer.module.save_checkpoint(os.path.join(output_dir, 'checkpoints'), iteration)
+                trainer.save_checkpoint(os.path.join(output_dir, 'checkpoints'), iteration)
 
                 # 保存图像 这里都是(b, c, h, w)
                 sparse_depth0_color = colorize((inputs['sparse_depth0'] / model_params['depth_model_params']['max_predict_depth']).cpu(), colormap='viridis')
@@ -120,7 +132,7 @@ def main(device: str,
 
                 for idx, inputs in enumerate(val_dataloader):
                     # inputs = {key: value.to(device) for key, value in inputs.items()}
-                    metrics, generated_val = trainer.module.validate(inputs)
+                    metrics, generated_val = trainer.validate(inputs)
                     generated_val = {key: value.detach().cpu() for key, value in generated_val.items()}
 
                     mae.append(metrics['mae'])
@@ -155,7 +167,7 @@ def main(device: str,
 
             progress_bar.set_postfix(**{k: f"{v:.3f}" for k, v in losses.items()})
         
-        trainer.module.scheduler_epoch_step()
+        trainer.scheduler_epoch_step()
 
 
 if __name__ == '__main__':

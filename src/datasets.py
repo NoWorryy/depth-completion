@@ -1,9 +1,11 @@
-import numpy as np
 import torch.utils.data
 import data_utils
+import traceback
+import json
+import random
+import numpy as np
 from torchvision import transforms
 from PIL import Image
-import json
 
 
 def random_crop(inputs, shape, intrinsics=None, RandCrop = False, tp_min=50):
@@ -91,41 +93,49 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
 
 
     def __getitem__(self, index):
-        # Load image
-        # image1, image0, image2 = load_image_triplet(self.image_paths[index],normalize=False)
-        images = Image.open(self.image_paths[index]).convert('RGB')
-        images = np.array(images)   # (h, 3w, c)
-        image1, image0, image2 = np.split(images, indices_or_sections=3, axis=1)   # (h, w, c)
+        try_cnt = 0
+        while True:
+            try:
+                try_cnt += 1
+                if try_cnt > 10:
+                    break
 
-        # Load depth
-        # sparse_depth0 = data_utils.load_depth(self.sparse_depth_paths[index], data_format='CHW')
-        z = np.array(Image.open(self.sparse_depth_paths[index]), dtype=np.float32)
-        z = z / 256.0   # Assert 16-bit (not 8-bit) depth map
-        z[z <= 0] = 0.0
-        sparse_depth0 = np.expand_dims(z, axis=-1)  # (h,w,c)
+                # Load image
+                images = Image.open(self.image_paths[index]).convert('RGB')
+                images = np.array(images)   # (h, 3w, c)
+                image1, image0, image2 = np.split(images, indices_or_sections=3, axis=1)   # (h, w, c)
+
+                # Load depth
+                z = np.array(Image.open(self.sparse_depth_paths[index]), dtype=np.float32)
+                z = z / 256.0   # Assert 16-bit (not 8-bit) depth map
+                z[z <= 0] = 0.0
+                sparse_depth0 = np.expand_dims(z, axis=-1)  # (h,w,c)
 
 
-        # Load camera intrinsics
-        intrinsics = np.load(self.intrinsics_paths[index]).astype(np.float32)
+                # Load camera intrinsics
+                intrinsics = np.load(self.intrinsics_paths[index]).astype(np.float32)
 
-        # Crop image, depth and adjust intrinsics
-        if self.RandCrop:
-            [image0, image1, image2, sparse_depth0], intrinsics = random_crop(
-                inputs=[image0, image1, image2, sparse_depth0],
-                shape=self.shape,
-                intrinsics=intrinsics,
-                RandCrop=self.RandCrop)
-        
-        # validity_map_depth0 = torch.where(sparse_depth0 > 0, torch.ones_like(sparse_depth0), torch.zeros_like(sparse_depth0))
-        inputs = {
-            'image0': self.transform(image0),   # 0~1 （）
-            'image1': self.transform(image1),
-            'image2': self.transform(image1),
-            'sparse_depth0': self.transform(sparse_depth0), # 真实值
-            'intrinsics': intrinsics.astype(np.float32)
-        }
+                # Crop image, depth and adjust intrinsics
+                if self.RandCrop:
+                    [image0, image1, image2, sparse_depth0], intrinsics = random_crop(
+                        inputs=[image0, image1, image2, sparse_depth0],
+                        shape=self.shape,
+                        intrinsics=intrinsics,
+                        RandCrop=self.RandCrop)
+                    
+                inputs = {
+                    'image0': self.transform(image0),   # 0~1 （）
+                    'image1': self.transform(image1),
+                    'image2': self.transform(image1),
+                    'sparse_depth0': self.transform(sparse_depth0), # 真实值
+                    'intrinsics': intrinsics.astype(np.float32)
+                }
 
-        return inputs
+                return inputs
+            except Exception as e:
+                print(f"read idx:{index}, {self.image_paths[index]} error, try_time:{try_cnt}, {type(e).__name__}: {e}")
+                print(traceback.format_exc())
+                index = random.randint(0,  len(self.image_paths) - 1)
 
     def __len__(self):
         return len(self.image_paths)

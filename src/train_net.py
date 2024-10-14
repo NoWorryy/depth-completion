@@ -1,11 +1,11 @@
 import os
 from loguru import logger
-import itertools
-import numpy as np
-
 import torch
 from torch.optim.lr_scheduler import MultiStepLR
-from torch.autograd import grad
+import accelerate
+from accelerate import Accelerator
+from accelerate.utils import set_seed
+
 
 from kbnet_model import KBNetModel
 from posenet_model import PoseNetModel
@@ -66,6 +66,9 @@ class Train_net(torch.nn.Module):
         logger.info('Ckpt loaded.')
 
         self.train_transforms = Transforms(**train_params['aug_params'])
+
+        self.depth_model = torch.nn.DataParallel(self.depth_model)
+        self.pose_net = torch.nn.DataParallel(self.pose_net)
 
     def train(self, inputs):
         """
@@ -268,21 +271,34 @@ class Train_net(torch.nn.Module):
             logger.info(f"load model checkpoint: {model_path}")
             ckpt = torch.load(model_path, map_location=lambda storage, loc: storage)
 
+            depth_state_dict = {}
+            for key, value in ckpt['depth_model'].items():
+                new_key = key.replace('module.', '')  # 去掉 'module.' 前缀
+                depth_state_dict[new_key] = value
+
+            pose_state_dict = {}
+            for key, value in ckpt['pose_net'].items():
+                new_key = key.replace('module.', '')  # 去掉 'module.' 前缀
+                pose_state_dict[new_key] = value
+            
+
             # Load model states
-            m, u = self.depth_model.load_state_dict(ckpt['depth_model'], strict=False)
-            logger.info(f"depth_model missing keys: {len(m)}, unexpected keys: {len(u)}")
-            m, u = self.pose_net.load_state_dict(ckpt['pose_net'], strict=False)
-            logger.info(f"pose_net missing keys: {len(m)}, unexpected keys: {len(u)}")
+            m, u = self.depth_model.load_state_dict(depth_state_dict, strict=False)
+            logger.info(f"depth_model loaded, missing keys: {len(m)}, unexpected keys: {len(u)}")
+            m, u = self.pose_net.load_state_dict(pose_state_dict, strict=False)
+            logger.info(f"pose_net loaded, missing keys: {len(m)}, unexpected keys: {len(u)}")
 
             # Load optimizer states
             self.optimizer_depth_model.load_state_dict(ckpt['optimizer_depth_model'])
-            self.optimizer_pose_net.load_state_dict(ckpt['optimizer_pose_net'])
+            self.optimizer_pose_net.load_state_dict(ckpt['optimizer_pose_net'],)
 
             # Load scheduler states
             self.scheduler_depth_model.load_state_dict(ckpt['scheduler_depth_model'])
             self.scheduler_pose_net.load_state_dict(ckpt['scheduler_pose_net'])
 
+
             iter = ckpt.get('iter', 0)
+            logger.info(f"iter loaded: {iter}")
         
         return iter
 
