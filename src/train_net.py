@@ -43,20 +43,16 @@ class Train_net(torch.nn.Module):
 
         # 优化器初始化
         logger.info('Initializing optimizers:')
-        self.optimizer_depth_model = torch.optim.Adam(self.depth_model.parameters(), 
-                                                      lr=train_params['lr_depth'], betas=(0.5, 0.999))
-        self.optimizer_pose_net = torch.optim.Adam(self.pose_net.parameters(),
-                                                   lr=train_params['lr_pose'], betas=(0.5, 0.999))
+        self.optimizer_depth_model = torch.optim.Adam(self.depth_model.parameters(), lr=train_params['lr_depth'], betas=(0.9, 0.999))
+        self.optimizer_pose_net = torch.optim.Adam(self.pose_net.parameters(), lr=train_params['lr_pose'], betas=(0.9, 0.999))
         logger.info('Optimizers initialized.')
 
 
         # 学习率调整器
         logger.info('Initializing schedulers:')
 
-        self.scheduler_depth_model = MultiStepLR(self.optimizer_depth_model, train_params['learning_schedule'],
-                                                                  gamma=0.5, last_epoch=-1)
-        self.scheduler_pose_net = MultiStepLR(self.optimizer_pose_net, train_params['learning_schedule'],
-                                                                  gamma=0.5, last_epoch=-1)
+        self.scheduler_depth_model = MultiStepLR(self.optimizer_depth_model, train_params['learning_schedule'], gamma=0.5, last_epoch=-1)
+        self.scheduler_pose_net = MultiStepLR(self.optimizer_pose_net, train_params['learning_schedule'], gamma=0.5, last_epoch=-1)
         logger.info('Schedulers initialized.')
 
 

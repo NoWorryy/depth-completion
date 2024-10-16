@@ -40,7 +40,8 @@ train_params:
   device: 'gpu'
   lr_depth: 2.0e-4
   lr_pose: 2.0e-4
-  # learning_rates: [0.5e-4, 1.0e-4, 1.5e-4, 1.0e-4, 5.0e-5, 2.0e-5] # 对应epoch
+  # learning_rates: [0.5e-4, 1.0e-4, 1.5e-4, 1.0e-4, 0.5e-4, 0.2e-4] # 对应epoch
+  # learning_schedule: [2, 8, 20, 30, 45, 60]
   learning_schedule: [2, 30, 45, 60]
 
   loss_weights:
@@ -77,13 +78,15 @@ dataset_train_params:
   train_sparse_depth_path: 'training/kitti/kitti_train_sparse_depth-clean.txt' 
   train_intrinsics_path: 'training/kitti/kitti_train_intrinsics-clean.txt' 
 
+  train_file_path : 'configs/my_kitti.json'
+
 
 dataset_val_params:
-  val_file_path: 'validation/val_file_path.json'
+  val_file_path: 'configs/my_kitti.json'
 
   min_evaluate_depth: 0.0 
   max_evaluate_depth: 100.0 
 
 
 pretrained_weights:
-  model_path: '/media/data2/libihan/codes/calibrated-backprojection-network/trained_kbnet/kitti/2024-10-12T18-05-52/checkpoints/ckpt_iter_10000.pth'
+  model_path: 'trained_kbnet/kitti/2024-10-12T18-05-52/checkpoints/ckpt_iter_10000.pth'

@@ -93,11 +93,13 @@ def main(device: str,
 
     logger.info(f'Begin training ------ train data length:{train_data_length}, max epoch:{max_epoch}, start_epoch:{start_epoch}')
     for epoch in range(start_epoch, max_epoch):
-        logger.info(f'================> current epoch: {epoch}')
+        
         # Set augmentation schedule
         if epoch > train_params['augmentation_schedule'][trainer.augmentation_schedule_pos]:    # [50, 55, 60]
             trainer.augmentation_schedule_pos = trainer.augmentation_schedule_pos + 1
             trainer.augmentation_probability = train_params['augmentation_probabilities'][trainer.augmentation_schedule_pos]
+
+        logger.info(f'===========================> current epoch: {epoch}, augmentation_probability: {trainer.augmentation_probability}')
 
         for step, inputs in enumerate(dataloader):
             

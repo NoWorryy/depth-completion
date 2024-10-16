@@ -1,3 +1,4 @@
+from PIL import Image
 import torch.utils.data
 import data_utils
 import traceback
@@ -5,7 +6,6 @@ import json
 import random
 import numpy as np
 from torchvision import transforms
-from PIL import Image
 
 
 def random_crop(inputs, shape, intrinsics=None, RandCrop = False, tp_min=50):
@@ -76,6 +76,7 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
     '''
 
     def __init__(self,
+                 train_file_path,
                  train_image_path,
                  train_sparse_depth_path,
                  train_intrinsics_path,
@@ -91,7 +92,10 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
         self.RandCrop = RandCrop
         self.transform = transforms.ToTensor()
 
+        with open(train_file_path, 'r') as file:
+            self.dataset = json.load(file)['train']
 
+    '''
     def __getitem__(self, index):
         try_cnt = 0
         while True:
@@ -126,7 +130,7 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
                 inputs = {
                     'image0': self.transform(image0),   # 0~1 （）
                     'image1': self.transform(image1),
-                    'image2': self.transform(image1),
+                    'image2': self.transform(image2),
                     'sparse_depth0': self.transform(sparse_depth0), # 真实值
                     'intrinsics': intrinsics.astype(np.float32)
                 }
@@ -136,9 +140,57 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
                 print(f"read idx:{index}, {self.image_paths[index]} error, try_time:{try_cnt}, {type(e).__name__}: {e}")
                 print(traceback.format_exc())
                 index = random.randint(0,  len(self.image_paths) - 1)
+    '''
+
+    
+    def __getitem__(self, index):
+        try_cnt = 0
+        while True:
+            try:
+                try_cnt += 1
+                if try_cnt > 10:
+                    break
+                
+                entry = self.dataset[index]
+                # Load image
+                image0 = np.array(Image.open(entry['image0']).convert('RGB'))   # (h, w, c)
+                image1 = np.array(Image.open(entry['image1']).convert('RGB'))
+                image2 = np.array(Image.open(entry['image2']).convert('RGB'))
+
+                # Load depth
+                z = np.array(Image.open(entry['sparse_depth0']), dtype=np.float32) / 256.0   # Assert 16-bit (not 8-bit) depth map
+                z[z <= 0] = 0.0
+                sparse_depth0 = np.expand_dims(z, axis=-1)  # (h,w,c)
+
+
+                # Load camera intrinsics
+                intrinsics = np.load(entry['intrinsic']).astype(np.float32)
+
+                # Crop image, depth and adjust intrinsics
+                if self.RandCrop:
+                    [image0, image1, image2, sparse_depth0], intrinsics = random_crop(
+                        inputs=[image0, image1, image2, sparse_depth0],
+                        shape=self.shape,
+                        intrinsics=intrinsics,
+                        RandCrop=self.RandCrop)
+                    
+                inputs = {
+                    'image0': self.transform(image0),   # 0~1 （）
+                    'image1': self.transform(image1),
+                    'image2': self.transform(image2),
+                    'sparse_depth0': self.transform(sparse_depth0), # 真实值
+                    'intrinsics': intrinsics.astype(np.float32)
+                }
+
+                return inputs
+            
+            except Exception as e:
+                print(f"read idx:{index}, {self.dataset[index]} error, try_time:{try_cnt}, {type(e).__name__}: {e}")
+                print(traceback.format_exc())
+                index = random.randint(0,  len(self.dataset) - 1)
 
     def __len__(self):
-        return len(self.image_paths)
+        return len(self.dataset)
 
 
 class KBNetInferenceDataset(torch.utils.data.Dataset):
@@ -164,7 +216,7 @@ class KBNetInferenceDataset(torch.utils.data.Dataset):
 
         # Read paths for training
         with open(val_file_path, 'r') as file:
-            self.dataset = json.load(file)
+            self.dataset = json.load(file)['test']
 
         self.min_evaluate_depth = min_evaluate_depth
         self.max_evaluate_depth = max_evaluate_depth
@@ -175,12 +227,10 @@ class KBNetInferenceDataset(torch.utils.data.Dataset):
         entry = self.dataset[index]
 
         # Load image
-        image = Image.open(entry['image']).convert('RGB')
-        image = np.array(image)   # (h, w, c) 整型
+        image = np.array(Image.open(entry['image']).convert('RGB'))   # (h, w, c) 整型
 
         # Load depth
-        z = np.array(Image.open(entry['sparse_depth']), dtype=np.float32)
-        z = z / 256.0   # Assert 16-bit (not 8-bit) depth map
+        z = np.array(Image.open(entry['sparse_depth']), dtype=np.float32) / 256.0   # Assert 16-bit (not 8-bit) depth map
         z[z <= 0] = 0.0
         sparse_depth = np.expand_dims(z, axis=-1)  # (h,w,c)
         v = z.astype(np.float32)

@@ -10,6 +10,7 @@ dir2_sp = os.path.join(root_directory, 'sparse_depth')
 
 # 获取dir1中的图片文件和dir2中的txt文件
 gt_files = [f for f in os.listdir(dir_gt) if f.endswith('.png')]
+gt_files.sort()
 img_files = [f.replace('groundtruth_depth', 'image') for f in gt_files]
 int_files = [f.replace('groundtruth_depth', 'image').replace('.png', '.txt') for f in gt_files]
 sp_files = [f.replace('groundtruth_depth', 'velodyne_raw') for f in gt_files]
