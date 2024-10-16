@@ -124,10 +124,10 @@ def main(device: str,
                 output_depth0_color = colorize((generated['output_depth0'] / model_params['depth_model_params']['max_predict_depth']).cpu(), colormap='viridis')
                 
                 train_data_pair = torch.cat([
-                    sparse_depth0_color, inputs['image0'], output_depth0_color, generated['image01'], generated['image02']],
+                    sparse_depth0_color, output_depth0_color, inputs['image0'], generated['image01'], generated['image02']],
                     dim = 2)
                 torchvision.utils.save_image(train_data_pair[:5, ...], f"{output_dir}/output_image/{f'train_data_pair-{iteration}'}.png")
-                tb_writer.add_images("train_sparse_image_dense_image01_image02", train_data_pair[:5, ...], global_step=iteration)
+                tb_writer.add_images("train_sparse_image0_dense_image01_image02", train_data_pair[:5, ...], global_step=iteration)
 
 
                 mae, rmse, imae, irmse = [], [], [], []

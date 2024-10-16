@@ -115,20 +115,20 @@ class Train_net(torch.nn.Module):
             validity_map_depth=filtered_validity_map_depth0,
             intrinsics=intrinsics)
 
-        pose01 = self.pose_net.forward(image0, image1)
+        pose01 = self.pose_net.forward(image0, image1)  # 0到1的外参变化
         pose02 = self.pose_net.forward(image0, image2)
 
         shape = image0.shape
 
         # Backproject points to 3D camera coordinates
-        points = net_utils.backproject_to_camera(output_depth0, intrinsics, shape)
+        points = net_utils.backproject_to_camera(output_depth0, intrinsics, shape)      # (b, 4, hw)
 
         # Reproject points onto image 1 and image 2
-        target_xy01 = net_utils.project_to_pixel(points, pose01, intrinsics, shape)
+        target_xy01 = net_utils.project_to_pixel(points, pose01, intrinsics, shape)     # (b, 2, h, w) image0的像素点在image1上的位置
         target_xy02 = net_utils.project_to_pixel(points, pose02, intrinsics, shape)
 
         # Reconstruct image0 from image1 and image2 by reprojection
-        image01 = net_utils.grid_sample(image1, target_xy01, shape)
+        image01 = net_utils.grid_sample(image1, target_xy01, shape)     # 从image1采样重建image0
         image02 = net_utils.grid_sample(image2, target_xy02, shape)
 
         generated = {
@@ -191,7 +191,7 @@ class Train_net(torch.nn.Module):
         Essential loss terms
         '''
         # Color consistency loss function
-        loss_color01 = losses.color_consistency_loss_func(src=generated['image01'], tgt=image0, w=validity_map_image0)
+        loss_color01 = losses.color_consistency_loss_func(src=generated['image01'], tgt=image0, w=validity_map_image0)  # 没有对通道平均 l1_loss = torch.mean(torch.abs(tgt - src))
         loss_color02 = losses.color_consistency_loss_func(src=generated['image02'], tgt=image0, w=validity_map_image0)
         loss_color = loss_color01 + loss_color02
 

@@ -1652,19 +1652,19 @@ def backproject_to_camera(depth, intrinsics, shape):
     n_batch, _, n_height, n_width = shape
 
     # Create homogeneous coordinates [x, y, 1]
-    xy_h = meshgrid(n_batch, n_height, n_width, device=depth.device, homogeneous=True)
+    xy_h = meshgrid(n_batch, n_height, n_width, device=depth.device, homogeneous=True)  # (b, 3, h, w)
 
     # Reshape pixel coordinates to N x 3 x (H x W)
-    xy_h = xy_h.view(n_batch, 3, -1)
+    xy_h = xy_h.view(n_batch, 3, -1)        # (b, 3, hw)
 
     # Reshape depth as N x 1 x (H x W)
-    depth = depth.view(n_batch, 1, -1)
+    depth = depth.view(n_batch, 1, -1)      # (b, 1, hw)
 
     # K^-1 [x, y, 1] z
-    points = torch.matmul(torch.inverse(intrinsics), xy_h) * depth
+    points = torch.matmul(torch.inverse(intrinsics), xy_h) * depth  # (b, 3, hw)
 
     # Make homogeneous
-    return torch.cat([points, torch.ones_like(depth)], dim=1)
+    return torch.cat([points, torch.ones_like(depth)], dim=1)   # (b, 4, hw)
 
 def project_to_pixel(points, pose, intrinsics, shape):
     '''
@@ -1691,14 +1691,14 @@ def project_to_pixel(points, pose, intrinsics, shape):
         .view(1, 1, 4) \
         .repeat(n_batch, 1, 1)
     intrinsics = torch.cat([intrinsics, column], dim=2)
-    intrinsics = torch.cat([intrinsics, row], dim=1)
+    intrinsics = torch.cat([intrinsics, row], dim=1)    # (b, 4, 4)
 
     # Apply the transformation and project: \pi K g p
     T = torch.matmul(intrinsics, pose)
-    T = T[:, 0:3, :]
-    points = torch.matmul(T, points)
-    points = points / (torch.unsqueeze(points[:, 2, :], dim=1) + 1e-7)
-    points = points[:, 0:2, :]
+    T = T[:, 0:3, :]    # (b, 3, 4)
+    points = torch.matmul(T, points)    # (b, 3, 3)
+    points = points / (torch.unsqueeze(points[:, 2, :], dim=1) + 1e-7)  # (b, 3, hw)
+    points = points[:, 0:2, :]  # (b, 2, hw)
 
     # Reshape to N x 2 x H x W
     return points.view(n_batch, 2, n_height, n_width)
@@ -1735,7 +1735,7 @@ def grid_sample(image, target_xy, shape, padding_mode='border'):
         image,
         grid=target_xy,
         mode='bilinear',
-        padding_mode=padding_mode,
+        padding_mode=padding_mode,  # 边缘填充
         align_corners=True)
 
 

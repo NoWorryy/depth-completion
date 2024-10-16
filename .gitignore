@@ -10,3 +10,4 @@ testing
 trained_kbnet
 kitti_depth
 configs/my_kitti.json
+mid/
