@@ -9,5 +9,5 @@ validation
 testing
 trained_kbnet
 kitti_depth
-configs/my_kitti.json
+configs/*.json
 mid/

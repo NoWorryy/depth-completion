@@ -87,17 +87,21 @@ def generate_json():
 
                 for idx, name in enumerate(list_depth):
                     
-                    name_base = os.path.splitext(name)[0]
-                    name_1 = int(name_base) - 1
-                    name_1 = f'{name_1:010d}.png'
-                    name_2 = int(name_base) + 1
-                    name_2 = f'{name_2:010d}.png'
+                    path_gt = os.path.join(list_depth_path, name)
+
+                    # name_base = os.path.splitext(name)[0]
+                    # name_1 = int(name_base) - 1
+                    # name_1 = f'{name_1:010d}.png'
+                    # name_2 = int(name_base) + 1
+                    # name_2 = f'{name_2:010d}.png'
 
                     path_rgb = os.path.join(raw_path, cam, 'data', name)
-                    path_rgb1 = os.path.join(raw_path, cam, 'data', name_1)
-                    path_rgb2 = os.path.join(raw_path, cam, 'data', name_2)
+                    # path_rgb1 = os.path.join(raw_path, cam, 'data', name_1)
+                    # path_rgb2 = os.path.join(raw_path, cam, 'data', name_2)
 
                     path_depth = os.path.join(args.path_root, 'data_depth_velodyne', split, seq, 'proj_depth/velodyne_raw', cam, name)
+
+                    path_reldepth = os.path.join(args.path_root, 'rel_depth', seq_data, seq, cam, name)
 
                     if cam == 'image_02':
                         path_calib = os.path.join(args.path_root, 'data_intrinsics', seq_data, 'intrinsics2.npy')
@@ -106,11 +110,13 @@ def generate_json():
                         path_calib = os.path.join(args.path_root, 'data_intrinsics', seq_data, 'intrinsics3.npy')
 
                     dict_sample = {
-                        'image0': path_rgb,
-                        'image1': path_rgb1,
-                        'image2': path_rgb2,
-                        'sparse_depth0': path_depth,
-                        'intrinsic': path_calib
+                        'image': path_rgb,
+                        # 'image1': path_rgb1,
+                        # 'image2': path_rgb2,
+                        'sparse_depth': path_depth,
+                        'intrinsic': path_calib,
+                        'gt': path_gt,
+                        'rel_depth': path_reldepth
                     }
 
                     flag_valid = True
@@ -146,13 +152,15 @@ def generate_json():
         path_depth = os.path.join(path_base, 'velodyne_raw', name)
         path_gt = os.path.join(path_base, 'groundtruth_depth', name.replace('velodyne_raw', 'groundtruth_depth'))
         path_calib = os.path.join(path_base, 'intrinsics', name.replace('velodyne_raw', 'image').replace('png', 'txt'))
+        path_reldepth = os.path.join(path_base, 'rel_depth', name.replace('velodyne_raw', 'rel_depth').replace('image', 'rel_depth'))
 
 
         dict_sample = {
             'image': path_rgb,
             'sparse_depth': path_depth,
             'gt': path_gt,
-            'intrinsic': path_calib
+            'intrinsic': path_calib,
+            'rel_depth': path_reldepth
         }
 
         flag_valid = True
