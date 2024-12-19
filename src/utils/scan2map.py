@@ -23,17 +23,20 @@ def draw_registration_result(source, target, transformation):
 
 # 函数：点云配准 (ICP)
 def icp_registration(source, target, threshold, trans_init):
-    evaluation = o3d.registration.evaluate_registration(
+    source.estimate_normals()
+    target.estimate_normals()
+
+    evaluation = o3d.pipelines.registration.evaluate_registration(
         source, target, threshold, trans_init)
     print(evaluation)
 
     # 使用ICP进行点云配准
-    icp_result = o3d.registration.registration_icp(
+    icp_result = o3d.pipelines.registration.registration_icp(
         source, target, threshold, trans_init,
-        o3d.registration.TransformationEstimationPointToPoint())
+        o3d.pipelines.registration.TransformationEstimationPointToPlane())
     
     print(icp_result)
-    draw_registration_result(source, target, icp_result.transformation)
+    # draw_registration_result(source, target, icp_result.transformation)
 
     return icp_result.transformation
 
@@ -83,8 +86,24 @@ rotation_threshold = 0.5     # 旋转变化阈值（单位：弧度）
 
 
 # 读取存放点云文件的文件夹
-pcd_folder = "/home/thinking/lbh/2011_09_26_drive_0001_sync/2011_09_26/2011_09_26_drive_0001_sync/velodyne_points/data/test/"
+pcd_folder = "/media/data1/datasets/DepthSemantic/KITTI/RAW_DATA/2011_09_26/2011_09_26_drive_0001_sync/velodyne_points/data/"
 pcd_files = sorted([os.path.join(pcd_folder, f) for f in os.listdir(pcd_folder) if f.endswith(".bin")])
+
+# 读取激光-相机外参
+calib_file_name = "/media/data1/datasets/DepthSemantic/KITTI/RAW_DATA/2011_09_26/calib_velo_to_cam.txt"
+calib_lines = [line.rstrip('\n') for line in open(calib_file_name, 'r')]
+T_lidar_to_cam = np.eye(4)
+for calib_line in calib_lines:
+    # 2号相机内参矩阵
+    if 'R' in calib_line:
+        R_lidar_to_cam = calib_line.split(' ')[1:]
+        R_lidar_to_cam = np.array(R_lidar_to_cam, dtype='float').reshape(3, 3)
+        T_lidar_to_cam[:3, :3] = R_lidar_to_cam
+    # 0号相机到2号相机的齐次变换
+    elif 'T' in calib_line:
+        t_lidar_to_cam = calib_line.split(' ')[1:]
+        t_lidar_to_cam = np.array(t_lidar_to_cam, dtype = 'float').reshape(1, 3)
+        T_lidar_to_cam[0:3, 3] = t_lidar_to_cam
 
 
 # 初始化：第一帧作为地图的起点
@@ -99,6 +118,8 @@ global_transformation = np.eye(4)  # 全局位姿（相对于第一帧的位姿�
 last_transformation = np.eye(4)  # 上一次的位姿变换
 prev_transformation = np.eye(4)  # 上上一次的位姿变换
 
+pose_txt_folder = "/media/data2/libihan/codes/calibrated-backprojection-network/kitti_depth/rel_pose/"
+
 
 # 逐帧配准
 for i in range(1, len(pcd_files)):
@@ -107,12 +128,21 @@ for i in range(1, len(pcd_files)):
     scan_cloud = load_and_preprocess_pcd(scan_file, voxel_size)
 
     # 使用匀速模型作为初始值：trans_init = last_transformation + (last_transformation - prev_transformation)
-    velocity = np.dot(last_transformation, np.linalg.inv(prev_transformation))  # 计算速度（两次位姿差）
+    velocity = np.dot(np.linalg.inv(prev_transformation), last_transformation)  # 计算速度（两次位姿差）
+    print("velocity: ", velocity)
+
     trans_init = np.dot(last_transformation, velocity)  # 预测下一帧的初始位姿
+    print("trans_init: ", trans_init)
+
+
     # 对当前帧(scan)与地图(map)进行ICP配准
-    transformation = icp_registration(map_cloud, scan_cloud, threshold, trans_init)
+    transformation = icp_registration(scan_cloud, map_cloud, threshold, trans_init)
+    print("transformation: ", transformation)
+
     # 更新全局位姿：累积每一帧的相对位姿变换
-    global_transformation = np.dot(global_transformation, transformation)
+    # global_transformation = np.dot(global_transformation, transformation)
+    global_transformation = transformation
+
     # 计算当前帧与上一个关键帧之间的位姿变化
     translation_change, rotation_change = compute_pose_change(np.dot(np.linalg.inv(last_keyframe_transformation), global_transformation))
     print(translation_change, rotation_change)
@@ -129,6 +159,13 @@ for i in range(1, len(pcd_files)):
     prev_transformation = last_transformation  # 保存为上上次位姿
     last_transformation = transformation  # 保存为上次位姿
     print(f"Transformation for frame {i}: \n{global_transformation}", '\n')
+
+    # 保存 相对位姿关系
+    delta_pose = np.dot(np.linalg.inv(prev_transformation), last_transformation)
+    delta_pose_cam = T_lidar_to_cam @ delta_pose @ np.linalg.inv(T_lidar_to_cam)
+    pose_file = pose_txt_folder + str(i) + ".txt"
+    with open(pose_file, 'w') as file:
+        np.savetxt(file, delta_pose_cam)
 
 
 

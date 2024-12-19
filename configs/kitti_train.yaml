@@ -36,7 +36,7 @@ train_params:
   n_batch: 25
   n_height: 256
   n_width: 1216
-  n_thread: 48
+  n_thread: 24
   device: 'gpu'
   lr_depth: 2.0e-4
   lr_pose: 2.0e-4
@@ -54,8 +54,8 @@ train_params:
     w_weight_decay_pose: 0.00 
 
   output_dir: 'trained_kbnet/kitti'
-  n_checkpoint: 5000
-  n_summary: 5000 
+  n_checkpoint: 1000
+  n_summary: 1000
   n_summary_display: 4
   validation_start_step: 100000
   restore_path: null
@@ -89,4 +89,4 @@ dataset_val_params:
 
 
 pretrained_weights:
-  model_path: 'trained_kbnet/kitti/2024-10-12T18-05-52/checkpoints/ckpt_iter_10000.pth'
+  model_path: '/media/data2/libihan/codes/calibrated-backprojection-network/trained_kbnet/kitti/2024-10-17T11-18-42/checkpoints/ckpt_iter_202000.pth'

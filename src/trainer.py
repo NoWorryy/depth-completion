@@ -46,6 +46,7 @@ def main(device: str,
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(f"{output_dir}/checkpoints", exist_ok=True)
     os.makedirs(f"{output_dir}/output_image", exist_ok=True)
+    os.makedirs(f"{output_dir}/input_image", exist_ok=True)
     OmegaConf.save(args, os.path.join(output_dir, 'config.yaml'))
     
     event_path = os.path.join(output_dir, 'events')
@@ -92,10 +93,11 @@ def main(device: str,
     progress_bar.set_description("Steps")
 
     logger.info(f'Begin training ------ train data length:{train_data_length}, max epoch:{max_epoch}, start_epoch:{start_epoch}')
+    first_epoch = True
     for epoch in range(start_epoch, max_epoch):
         
         # Set augmentation schedule
-        if epoch > train_params['augmentation_schedule'][trainer.augmentation_schedule_pos]:    # [50, 55, 60]
+        if epoch == train_params['augmentation_schedule'][trainer.augmentation_schedule_pos]:    # [50, 55, 60]
             trainer.augmentation_schedule_pos = trainer.augmentation_schedule_pos + 1
             trainer.augmentation_probability = train_params['augmentation_probabilities'][trainer.augmentation_schedule_pos]
 
@@ -103,6 +105,15 @@ def main(device: str,
 
         for step, inputs in enumerate(dataloader):
             
+            if first_epoch and step < 10:
+                first_epoch = False
+                for idx, (image0, image1, image2, sparse_depth0) in \
+                    enumerate(zip(inputs['image0'], inputs['image1'], inputs['image2'], inputs['sparse_depth0'])):
+
+                    # concat source and driving image
+                    train_data_pair = torch.cat([image0, image1, image2, sparse_depth0.repeat(3, 1, 1)], dim=1)
+                    torchvision.utils.save_image(train_data_pair, f"{output_dir}/input_image/{f'train_data_pair-step{step}-{idx}'}.png")
+                    
             loss_info, generated = trainer.train(inputs)
 
             losses = {key: value.mean().detach().data.cpu().numpy() for key, value in loss_info.items()}
@@ -111,6 +122,9 @@ def main(device: str,
             progress_bar.update(1)
             global_step += 1
             iteration = epoch * train_data_length + step
+
+            tb_writer.add_scalar('lr_depth', trainer.optimizer_depth_model.param_groups[0]['lr'], iteration)
+            tb_writer.add_scalar('lr_pose', trainer.optimizer_pose_net.param_groups[0]['lr'], iteration)
 
             # write to tensorboard
             write_loss(iteration, tb_writer, losses)
