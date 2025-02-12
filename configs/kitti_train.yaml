@@ -1,31 +1,17 @@
 global_seed: 42
 
 model_params:
-  depth_model_params:
-    input_channels_image: 3 
-    input_channels_depth: 2 
-
-    min_pool_sizes_sparse_to_dense_pool: [5, 7, 9, 11, 13]
-    max_pool_sizes_sparse_to_dense_pool: [15, 17]
-    n_convolution_sparse_to_dense_pool: 3  
-    n_filter_sparse_to_dense_pool: 8 
-
-    n_filters_encoder_image: [48, 96, 192, 384, 384] 
-    n_filters_encoder_depth: [16, 32, 64, 128, 128]
-    n_filters_decoder: [256, 128, 128, 64, 12] 
-    resolutions_backprojection: [0, 1, 2, 3]
-    deconv_type: 'up'
-    weight_initializer: 'xavier_normal'
-    activation_func: 'leaky_relu'
+  output_params:
     min_predict_depth: 1.5
     max_predict_depth: 100.0
 
-  pose_net_params:
-    encoder_type: 'resnet18'
-    rotation_parameterization: 'axis'
-    weight_initializer: 'xavier_normal'
-    activation_func: 'relu'
-  
+  depth_anything:
+    encoder: 'vitb' # choices=['vits', 'vitb', 'vitl', 'vitg']
+    input_size: 518
+
+  scale_model_params:
+    use_prefill: true
+
   outlier_params:
       kernel_size: 7 
       threshold: 1.5 
@@ -33,30 +19,28 @@ model_params:
 
 # Training settings
 train_params:
-  n_batch: 25
+  n_batch: 1
   n_height: 256
   n_width: 1216
   n_thread: 24
   device: 'gpu'
-  lr_depth: 2.0e-4
-  lr_pose: 2.0e-4
+  lr_scale: 2.0e-4
   # learning_rates: [0.5e-4, 1.0e-4, 1.5e-4, 1.0e-4, 0.5e-4, 0.2e-4] # 对应epoch
   # learning_schedule: [2, 8, 20, 30, 45, 60]
   learning_schedule: [2, 30, 45, 60]
 
+  patch_size: 14
+
   loss_weights:
     # Loss function settings
-    w_color: 0.15 
-    w_structure: 0.95 
-    w_sparse_depth: 0.60 
-    w_smoothness: 0.0400 
-    w_weight_decay_depth: 0.00 
-    w_weight_decay_pose: 0.00 
+    w_gt: 1
+    w_e: 0.2 
 
   output_dir: 'trained_kbnet/kitti'
   n_checkpoint: 1000
   n_summary: 1000
   n_summary_display: 4
+  n_test: 1000
   validation_start_step: 100000
   restore_path: null
 
@@ -68,25 +52,26 @@ train_params:
     random_remove_points: [0.60, 0.70]  # how much to remove from each sample
     random_noise_type: []
     random_noise_spread: -1
+  
+  # 分布式训练相关配置
+  mixed_precision_training: 'no'
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
 
 
 dataset_train_params:
   shape: [256, 1216, 3]
-  RandCrop: true
-
-  train_image_path: 'training/kitti/kitti_train_image-clean.txt'
-  train_sparse_depth_path: 'training/kitti/kitti_train_sparse_depth-clean.txt' 
-  train_intrinsics_path: 'training/kitti/kitti_train_intrinsics-clean.txt' 
-
-  train_file_path : 'configs/my_kitti.json'
+  RandCrop: false
+  train_file_path : 'configs/kitti_reldepth.json'
 
 
 dataset_val_params:
-  val_file_path: 'configs/my_kitti.json'
+  val_file_path: 'configs/kitti_reldepth.json'
 
   min_evaluate_depth: 0.0 
   max_evaluate_depth: 100.0 
 
 
 pretrained_weights:
-  model_path: '/media/data2/libihan/codes/calibrated-backprojection-network/trained_kbnet/kitti/2024-10-17T11-18-42/checkpoints/ckpt_iter_202000.pth'
+  model_path:
+  depth_anything_ckpt: '/media/data2/libihan/codes/Depth-Anything-V2/checkpoints/depth_anything_v2_vitb.pth'

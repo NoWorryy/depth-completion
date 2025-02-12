@@ -29,31 +29,15 @@ def main(device: str,
         pretrained_weights: dict,
         global_seed: int = 42 ):
     
-    # rank = int(os.environ.get('RANK', '0'))
-    # num_gpus = torch.cuda.device_count()
-    # local_rank = rank % num_gpus
-    # torch.cuda.set_device(local_rank)
-    # device = torch.device(f"cuda:{local_rank}")
+    rank = int(os.environ.get('RANK', '0'))
+    num_gpus = torch.cuda.device_count()
+    local_rank = rank % num_gpus
+    torch.cuda.set_device(local_rank)
+    device = torch.device(f"cuda:{local_rank}")
 
-    # seed = global_seed + int(rank)
-    # torch.manual_seed(seed)
+    seed = global_seed + int(rank)
+    torch.manual_seed(seed)
 
-
-    # output setting
-    folder_name = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-    output_dir = os.path.join(train_params['output_dir'], folder_name)
-    
-    os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(f"{output_dir}/checkpoints", exist_ok=True)
-    os.makedirs(f"{output_dir}/output_image", exist_ok=True)
-    os.makedirs(f"{output_dir}/input_image", exist_ok=True)
-    OmegaConf.save(args, os.path.join(output_dir, 'config.yaml'))
-    
-    event_path = os.path.join(output_dir, 'events')
-    log_path = os.path.join(output_dir, 'results.txt')
-    
-    # Set up tensorboard summary writers
-    tb_writer = SummaryWriter(log_dir = event_path)
 
     # Preparing dataset
     train_dataset = datasets.KBNetTrainingDataset(**dataset_train_params)
@@ -79,7 +63,29 @@ def main(device: str,
                         pretrained_weights = pretrained_weights)
 
     # trainer = torch.nn.DataParallel(trainer)
-    # trainer.accelerator.prepare()
+    trainer.depth_anything, trainer.scale_model, trainer.optimizer_scale_modell, dataloader, val_dataloader = trainer.accelerator.prepare(
+        trainer.depth_anything, trainer.scale_model, trainer.optimizer_scale_model, dataloader, val_dataloader)
+    # trainer.accelerator.register_for_checkpointing(trainer.scheduler_scale_model)
+
+    # output setting
+    folder_name = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    output_dir = os.path.join(train_params['output_dir'], folder_name)
+
+    if trainer.accelerator.is_main_process:
+        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(f"{output_dir}/checkpoints", exist_ok=True)
+        os.makedirs(f"{output_dir}/output_image", exist_ok=True)
+        os.makedirs(f"{output_dir}/input_image", exist_ok=True)
+        OmegaConf.save(args, os.path.join(output_dir, 'config.yaml'))
+    
+    event_path = os.path.join(output_dir, 'events')
+    log_path = os.path.join(output_dir, 'results.txt')
+    
+    # Set up tensorboard summary writers
+    if trainer.accelerator.is_main_process:
+        tb_writer = SummaryWriter(log_dir = event_path)
+    else:
+        tb_writer = None
 
 
     # training
@@ -105,13 +111,13 @@ def main(device: str,
 
         for step, inputs in enumerate(dataloader):
             
-            if first_epoch and step < 10:
+            if trainer.accelerator.is_main_process and first_epoch and step < 10:
                 first_epoch = False
-                for idx, (image0, image1, image2, sparse_depth0) in \
-                    enumerate(zip(inputs['image0'], inputs['image1'], inputs['image2'], inputs['sparse_depth0'])):
+                for idx, (image, sparse_depth, gt) in \
+                    enumerate(zip(inputs['image'], inputs['sparse_depth'], inputs['gt'])):
 
                     # concat source and driving image
-                    train_data_pair = torch.cat([image0, image1, image2, sparse_depth0.repeat(3, 1, 1)], dim=1)
+                    train_data_pair = torch.cat([image, sparse_depth.repeat(3,1,1), gt.repeat(3,1,1)], dim=1)
                     torchvision.utils.save_image(train_data_pair, f"{output_dir}/input_image/{f'train_data_pair-step{step}-{idx}'}.png")
                     
             loss_info, generated = trainer.train(inputs)
@@ -119,31 +125,32 @@ def main(device: str,
             losses = {key: value.mean().detach().data.cpu().numpy() for key, value in loss_info.items()}
             generated = {key: value.detach().cpu() for key, value in generated.items()}
             
-            progress_bar.update(1)
-            global_step += 1
-            iteration = epoch * train_data_length + step
+            if trainer.accelerator.sync_gradients and trainer.accelerator.is_main_process:
+                progress_bar.update(1)
+                global_step += 1
+                iteration = epoch * train_data_length + step
 
-            tb_writer.add_scalar('lr_depth', trainer.optimizer_depth_model.param_groups[0]['lr'], iteration)
-            tb_writer.add_scalar('lr_pose', trainer.optimizer_pose_net.param_groups[0]['lr'], iteration)
+                tb_writer.add_scalar('lr', trainer.optimizer_scale_model.param_groups[0]['lr'], iteration)
 
-            # write to tensorboard
-            write_loss(iteration, tb_writer, losses)
-
-
-            if (iteration % train_params['n_summary']) == 0:
-                trainer.save_checkpoint(os.path.join(output_dir, 'checkpoints'), iteration)
-
-                # 保存图像 这里都是(b, c, h, w)
-                sparse_depth0_color = colorize((inputs['sparse_depth0'] / model_params['depth_model_params']['max_predict_depth']).cpu(), colormap='viridis')
-                output_depth0_color = colorize((generated['output_depth0'] / model_params['depth_model_params']['max_predict_depth']).cpu(), colormap='viridis')
-                
-                train_data_pair = torch.cat([
-                    sparse_depth0_color, output_depth0_color, inputs['image0'], generated['image01'], generated['image02']],
-                    dim = 2)
-                torchvision.utils.save_image(train_data_pair[:5, ...], f"{output_dir}/output_image/{f'train_data_pair-{iteration}'}.png")
-                tb_writer.add_images("train_sparse_image0_dense_image01_image02", train_data_pair[:5, ...], global_step=iteration)
+                # write to tensorboard
+                write_loss(iteration, tb_writer, losses)
 
 
+                if (iteration % train_params['n_summary']) == 0:
+                    trainer.save_checkpoint(os.path.join(output_dir, 'checkpoints'), iteration)
+
+                    # 保存图像 这里都是(b, c, h, w)
+                    sparse_depth_color = colorize((inputs['sparse_depth'] / model_params['output_params']['max_predict_depth']).cpu(), colormap='viridis')
+                    output_depth_color = colorize((generated['output_depth'] / model_params['output_params']['max_predict_depth']).cpu(), colormap='viridis')
+                    gt_color = colorize((inputs['gt'] / model_params['output_params']['max_predict_depth']).cpu(), colormap='viridis')
+
+                    train_data_pair = torch.cat([
+                        inputs['image'], sparse_depth_color, output_depth_color, gt_color],
+                        dim = 2)
+                    torchvision.utils.save_image(train_data_pair[:5, ...], f"{output_dir}/output_image/{f'train_data_pair-{iteration}'}.png")
+                    tb_writer.add_images("train_img_sd_output_gt", train_data_pair[:5, ...], global_step=iteration)
+
+            if (iteration % train_params['n_test']) == 0:
                 mae, rmse, imae, irmse = [], [], [], []
 
                 for idx, inputs in enumerate(val_dataloader):
@@ -156,7 +163,7 @@ def main(device: str,
                     imae.append(metrics['imae'])
                     irmse.append(metrics['irmse'])
 
-                    if idx == 0:    # 保存第一个batch的图片
+                    if idx == 0 and trainer.accelerator.sync_gradients and trainer.accelerator.is_main_process:    # 保存第一个batch的图片
                         sparse_depth_color = colorize((inputs['sparse_depth'] / model_params['depth_model_params']['max_predict_depth']).cpu(), colormap='viridis')
                         output_depth_color = colorize((generated_val['output_depth'] / model_params['depth_model_params']['max_predict_depth']).cpu(), colormap='viridis')
                         
@@ -184,6 +191,9 @@ def main(device: str,
             progress_bar.set_postfix(**{k: f"{v:.3f}" for k, v in losses.items()})
         
         trainer.scheduler_epoch_step()
+        trainer.accelerator.wait_for_everyone()
+    
+    trainer.accelerator.end_training()
 
 
 if __name__ == '__main__':
