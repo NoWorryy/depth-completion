@@ -107,11 +107,11 @@ def main(device: str,
             
             if first_epoch and step < 10:
                 first_epoch = False
-                for idx, (image0, image1, image2, sparse_depth0) in \
-                    enumerate(zip(inputs['image0'], inputs['image1'], inputs['image2'], inputs['sparse_depth0'])):
+                for idx, (image, sparse_depth, gt) in \
+                    enumerate(zip(inputs['image'], inputs['sparse_depth'], inputs['gt'])):
 
                     # concat source and driving image
-                    train_data_pair = torch.cat([image0, image1, image2, sparse_depth0.repeat(3, 1, 1)], dim=1)
+                    train_data_pair = torch.cat([image, sparse_depth.repeat(3,1,1), gt.repeat(3,1,1)], dim=1)
                     torchvision.utils.save_image(train_data_pair, f"{output_dir}/input_image/{f'train_data_pair-step{step}-{idx}'}.png")
                     
             loss_info, generated = trainer.train(inputs)
@@ -134,14 +134,15 @@ def main(device: str,
                 trainer.save_checkpoint(os.path.join(output_dir, 'checkpoints'), iteration)
 
                 # 保存图像 这里都是(b, c, h, w)
-                sparse_depth0_color = colorize((inputs['sparse_depth0'] / model_params['depth_model_params']['max_predict_depth']).cpu(), colormap='viridis')
-                output_depth0_color = colorize((generated['output_depth0'] / model_params['depth_model_params']['max_predict_depth']).cpu(), colormap='viridis')
-                
+                sparse_depth_color = colorize((inputs['sparse_depth'] / model_params['output_params']['max_predict_depth']).cpu(), colormap='viridis')
+                output_depth_color = colorize((generated['output_depth'] / model_params['output_params']['max_predict_depth']).cpu(), colormap='viridis')
+                gt_color = colorize((inputs['gt'] / model_params['output_params']['max_predict_depth']).cpu(), colormap='viridis')
+
                 train_data_pair = torch.cat([
-                    sparse_depth0_color, output_depth0_color, inputs['image0'], generated['image01'], generated['image02']],
+                    inputs['image'], sparse_depth_color, output_depth_color, gt_color],
                     dim = 2)
                 torchvision.utils.save_image(train_data_pair[:5, ...], f"{output_dir}/output_image/{f'train_data_pair-{iteration}'}.png")
-                tb_writer.add_images("train_sparse_image0_dense_image01_image02", train_data_pair[:5, ...], global_step=iteration)
+                tb_writer.add_images("train_img_sd_output_gt", train_data_pair[:5, ...], global_step=iteration)
 
 
                 mae, rmse, imae, irmse = [], [], [], []

@@ -77,16 +77,8 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
 
     def __init__(self,
                  train_file_path,
-                 train_image_path,
-                 train_sparse_depth_path,
-                 train_intrinsics_path,
                  shape=None,
                  RandCrop=False):
-        
-        # Read paths for training
-        self.image_paths = data_utils.read_paths(train_image_path)     # kitti_train_image-clean.txt
-        self.sparse_depth_paths = data_utils.read_paths(train_sparse_depth_path)
-        self.intrinsics_paths = data_utils.read_paths(train_intrinsics_path)
 
         self.shape = shape
         self.RandCrop = RandCrop
@@ -153,33 +145,33 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
                 
                 entry = self.dataset[index]
                 # Load image
-                image0 = np.array(Image.open(entry['image0']).convert('RGB'))   # (h, w, c)
-                image1 = np.array(Image.open(entry['image1']).convert('RGB'))
-                image2 = np.array(Image.open(entry['image2']).convert('RGB'))
+                image = np.array(Image.open(entry['image']).convert('RGB'))   # (h, w, c)
 
                 # Load depth
-                z = np.array(Image.open(entry['sparse_depth0']), dtype=np.float32) / 256.0   # Assert 16-bit (not 8-bit) depth map
+                z = np.array(Image.open(entry['sparse_depth']), dtype=np.float32) / 256.0   # Assert 16-bit (not 8-bit) depth map
                 z[z <= 0] = 0.0
-                sparse_depth0 = np.expand_dims(z, axis=-1)  # (h,w,c)
+                sparse_depth = np.expand_dims(z, axis=-1)  # (h,w,c)
 
+                # Load gt
+                gt = np.array(Image.open(entry['gt']), dtype=np.float32) / 256.0   # Assert 16-bit (not 8-bit) depth map
+                gt[gt <= 0] = 0.0
+                gt = np.expand_dims(gt, axis=-1)  # (h,w,c)
 
                 # Load camera intrinsics
                 intrinsics = np.load(entry['intrinsic']).astype(np.float32)
 
                 # Crop image, depth and adjust intrinsics
-                if self.RandCrop:
-                    [image0, image1, image2, sparse_depth0], intrinsics = random_crop(
-                        inputs=[image0, image1, image2, sparse_depth0],
-                        shape=self.shape,
-                        intrinsics=intrinsics,
-                        RandCrop=self.RandCrop)
+                [image, sparse_depth, gt], intrinsics = random_crop(
+                    inputs=[image, sparse_depth, gt],
+                    shape=self.shape,
+                    intrinsics=intrinsics,
+                    RandCrop=self.RandCrop)
                     
                 inputs = {
-                    'image0': self.transform(image0),   # 0~1 （）
-                    'image1': self.transform(image1),
-                    'image2': self.transform(image2),
-                    'sparse_depth0': self.transform(sparse_depth0), # 真实值
-                    'intrinsics': intrinsics.astype(np.float32)
+                    'image': self.transform(image),   # 0~1 （）
+                    'sparse_depth': self.transform(sparse_depth), # 真实值
+                    'intrinsics': intrinsics.astype(np.float32),
+                    'gt': self.transform(gt)
                 }
 
                 return inputs
@@ -275,8 +267,8 @@ if __name__ == '__main__':
     args = OmegaConf.load(cfg_path)
     print(args['dataset_train_params'])
     
-    # dataset = KBNetTrainingDataset(**args['dataset_train_params'])
-    dataset = KBNetInferenceDataset(**args['dataset_val_params'])
+    dataset = KBNetTrainingDataset(**args['dataset_train_params'])
+    # dataset = KBNetInferenceDataset(**args['dataset_val_params'])
     print(len(dataset))
 
     for i in range(len(dataset)):

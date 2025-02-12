@@ -2,17 +2,19 @@ import os
 from loguru import logger
 import torch
 from torch.optim.lr_scheduler import MultiStepLR
+import torch.nn.functional as F
 import accelerate
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 
 
-from kbnet_model import KBNetModel
-from posenet_model import PoseNetModel
+from scale_model import ScaleModel
 from net_utils import OutlierRemoval
 from transforms import Transforms
+from depth_anything_v2.dpt import DepthAnythingV2
 import losses, net_utils, eval_utils
-
+print(torch.__version__)
+print(torch.cuda.is_available())
 
 class Train_net(torch.nn.Module):
     """
@@ -32,27 +34,43 @@ class Train_net(torch.nn.Module):
 
         # 模型初始化
         logger.info('Initializing models:')
-        self.depth_model = KBNetModel(**model_params['depth_model_params'])
-        self.pose_net = PoseNetModel(**model_params['pose_net_params'])
+
+        model_configs = {
+            'vits': {'encoder': 'vits', 'embed_dim': 384, 'features': 64, 'out_channels': [48, 96, 192, 384]},
+            'vitb': {'encoder': 'vitb', 'embed_dim': 768, 'features': 128, 'out_channels': [96, 192, 384, 768]},
+            'vitl': {'encoder': 'vitl', 'embed_dim': 1024, 'features': 256, 'out_channels': [256, 512, 1024, 1024]},
+            'vitg': {'encoder': 'vitg', 'embed_dim': 1536, 'features': 384, 'out_channels': [1536, 1536, 1536, 1536]}
+        }
+        scale_config = model_configs[model_params['depth_anything']['encoder']]
+
+        self.depth_anything = DepthAnythingV2(**scale_config)
+
+        self.scale_model = ScaleModel(nclass=1,
+                                      in_channels=scale_config['embed_dim'],
+                                      features=scale_config['features'],
+                                      out_channels=scale_config['out_channels'],
+                                      use_bn=False,
+                                      use_clstoken=False,
+                                      use_prefill=model_params['scale_model_params']['use_prefill'],
+                                      output_act='sigmoid')
+        
         self.outlier_removal = OutlierRemoval(**model_params['outlier_params'])
 
-        self.depth_model.to(self.device)
-        self.pose_net.to(self.device)
+        self.depth_anything.to(self.device)
+        self.scale_model.to(self.device)
+   
         logger.info('Models initialized.')
 
 
         # 优化器初始化
         logger.info('Initializing optimizers:')
-        self.optimizer_depth_model = torch.optim.Adam(self.depth_model.parameters(), lr=train_params['lr_depth'], betas=(0.9, 0.999))
-        self.optimizer_pose_net = torch.optim.Adam(self.pose_net.parameters(), lr=train_params['lr_pose'], betas=(0.9, 0.999))
+        self.optimizer_scale_model = torch.optim.Adam(self.scale_model.parameters(), lr=train_params['lr_scale'], betas=(0.9, 0.999))
         logger.info('Optimizers initialized.')
 
 
         # 学习率调整器
         logger.info('Initializing schedulers:')
-
-        self.scheduler_depth_model = MultiStepLR(self.optimizer_depth_model, train_params['learning_schedule'], gamma=0.5, last_epoch=-1)
-        self.scheduler_pose_net = MultiStepLR(self.optimizer_pose_net, train_params['learning_schedule'], gamma=0.5, last_epoch=-1)
+        self.scheduler_scale_model = MultiStepLR(self.optimizer_scale_model, train_params['learning_schedule'], gamma=0.5, last_epoch=-1)
         logger.info('Schedulers initialized.')
 
 
@@ -63,161 +81,77 @@ class Train_net(torch.nn.Module):
 
         self.train_transforms = Transforms(**train_params['aug_params'])
 
-        self.depth_model = torch.nn.DataParallel(self.depth_model)
-        self.pose_net = torch.nn.DataParallel(self.pose_net)
+        self.scale_model = torch.nn.DataParallel(self.scale_model)
+        self.depth_anything = torch.nn.DataParallel(self.depth_anything)
+
 
     def train(self, inputs):
         """
-        :param x: dict, contain source, driving, and other
-                  source: torch.Tensor,  # (bs, 3, h, w) normalized 0~1
-                  driving: torch.Tensor   # (bs, 3, h, w) normalized 0~1
-        :return:
+        param :
+        return:
         """
         # Set models to training mode
-        self.depth_model.train()
-        self.pose_net.train()
+        self.depth_anything.eval()
+        self.depth_anything.requires_grad_(False)
 
-        self.depth_model.requires_grad_(True)
-        self.pose_net.requires_grad_(True)
+        self.scale_model.train()
+        self.scale_model.requires_grad_(True)
+        self.optimizer_scale_model.zero_grad()
 
-        self.optimizer_depth_model.zero_grad()
-        self.optimizer_pose_net.zero_grad()
 
-  
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
-        image0, image1, image2, sparse_depth0, intrinsics = \
-            inputs['image0'], inputs['image1'], inputs['image2'], inputs['sparse_depth0'], inputs['intrinsics']
-
-        # Validity map is where sparse depth is available
-        validity_map_depth0 = torch.where(sparse_depth0 > 0, torch.ones_like(sparse_depth0), torch.zeros_like(sparse_depth0))
-
-        # Remove outlier points and update sparse depth and validity map
-        filtered_sparse_depth0, filtered_validity_map_depth0 = self.outlier_removal.remove_outliers(
-                sparse_depth=sparse_depth0,
-                validity_map=validity_map_depth0)
-                
+        image, sparse_depth, gt = \
+            inputs['image'], inputs['sparse_depth'], inputs['gt']
         
-        # Do data augmentation
-        trans_outputs = self.train_transforms.transform(
-                images_arr = [image0, image1, image2],
-                range_maps_arr = [sparse_depth0],
-                validity_maps_arr = [filtered_sparse_depth0, filtered_validity_map_depth0],
-                random_transform_probability = self.augmentation_probability)
-        
-        [image0, image1, image2] = trans_outputs['images_arr']
-        [sparse_depth0] = trans_outputs['range_maps_arr']
-        [filtered_sparse_depth0, filtered_validity_map_depth0] = trans_outputs['validity_maps_arr']
-        
-        # Forward through the network
-        output_depth0 = self.depth_model.forward(
-            image=image0,
-            sparse_depth=sparse_depth0,     # Depth inputs to network: (1) raw sparse depth, (2) filtered validity map
-            validity_map_depth=filtered_validity_map_depth0,
-            intrinsics=intrinsics)
+        # 获取相对深度图和图像特征
+        rel_depth, img_feat = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
+        rel_depth = (rel_depth - rel_depth.min()) / (rel_depth.max() - rel_depth.min())
 
-        pose01 = self.pose_net.forward(image0, image1)  # 0到1的外参变化
-        pose02 = self.pose_net.forward(image0, image2)
+        # 获取稀疏尺度
+        rel_depth_invalid = (rel_depth == 0)
+        rel_depth[rel_depth_invalid] = 1
+        sparse_scale = torch.div(sparse_depth, rel_depth)
+        sparse_scale[rel_depth_invalid] = 0
+        rel_depth[rel_depth_invalid] = 0
 
-        shape = image0.shape
+        patch_h = 37
+        patch_w = img_feat[0][0].shape[1] // 37   # (B, n, d)
+        ouput_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:])    # (B, 518, W0) ---> (B, H, W)
+        # ouput_scale = F.interpolate(ouput_scale[:, None], image.shape[2:], mode="bilinear", align_corners=True)     # (B, H, W)
 
-        # Backproject points to 3D camera coordinates
-        points = net_utils.backproject_to_camera(output_depth0, intrinsics, shape)      # (b, 4, hw)
-
-        # Reproject points onto image 1 and image 2
-        target_xy01 = net_utils.project_to_pixel(points, pose01, intrinsics, shape)     # (b, 2, h, w) image0的像素点在image1上的位置
-        target_xy02 = net_utils.project_to_pixel(points, pose02, intrinsics, shape)
-
-        # Reconstruct image0 from image1 and image2 by reprojection
-        image01 = net_utils.grid_sample(image1, target_xy01, shape)     # 从image1采样重建image0
-        image02 = net_utils.grid_sample(image2, target_xy02, shape)
-
+        output_depth = torch.mul(ouput_scale, rel_depth)
         generated = {
-            'output_depth0': output_depth0,
-            'image01': image01,
-            'image02': image02
+            'ouput_scale': ouput_scale, 
+            'output_depth': output_depth
         }
 
         # Compute loss function 
-        loss, loss_info = self.compute_loss(image0, sparse_depth0, filtered_validity_map_depth0, generated, self.train_params['loss_weights'])
+        loss, loss_info = self.compute_loss(generated, gt, rel_depth, self.train_params['loss_weights'])
         
         loss.backward()
 
-        self.optimizer_depth_model.step()
-        self.optimizer_pose_net.step()
+        self.optimizer_scale_model.step()
+     
  
         return loss_info, generated
 
 
-    def compute_loss(self, image0, sparse_depth0, filtered_validity_map_depth0, generated, loss_weights):
-        '''
-        Computes loss function
-        l = w_{ph}l_{ph} + w_{sz}l_{sz} + w_{sm}l_{sm}
+    def compute_loss(self, generated, gt, rel_depth, loss_weights):
 
-        Arg(s):
-            image0 : torch.Tensor[float32]
-                N x 3 x H x W image at time step t
-            image1 : torch.Tensor[float32]
-                N x 3 x H x W image at time step t-1
-            image2 : torch.Tensor[float32]
-                N x 3 x H x W image at time step t+1
-            output_depth0 : torch.Tensor[float32]
-                N x 1 x H x W output depth at time t
-            sparse_depth0 : torch.Tensor[float32]
-                N x 1 x H x W sparse depth at time t
-            validity_map_depth0 : torch.Tensor[float32]
-                N x 1 x H x W validity map of sparse depth at time t
-            intrinsics : torch.Tensor[float32]
-                N x 3 x 3 camera intrinsics matrix
-            pose01 : torch.Tensor[float32]
-                N x 4 x 4 relative pose from image at time t to t-1
-            pose02 : torch.Tensor[float32]
-                N x 4 x 4 relative pose from image at time t to t+1
-            w_color : float
-                weight of color consistency term
-            w_structure : float
-                weight of structure consistency term (SSIM)
-            w_sparse_depth : float
-                weight of sparse depth consistency term
-            w_smoothness : float
-                weight of local smoothness term
-        Returns:
-            torch.Tensor[float32] : loss
-            dict[str, torch.Tensor[float32]] : dictionary of loss related tensors
-        '''
+        gt_mask = (gt != 0)
+        valid_points = gt_mask.sum()
+        loss_gt = torch.sum(torch.abs(generated['output_depth'] - gt ) * gt_mask) / valid_points
 
-        validity_map_image0 = torch.ones_like(sparse_depth0)
-
-        '''
-        Essential loss terms
-        '''
-        # Color consistency loss function
-        loss_color01 = losses.color_consistency_loss_func(src=generated['image01'], tgt=image0, w=validity_map_image0)  # 没有对通道平均 l1_loss = torch.mean(torch.abs(tgt - src))
-        loss_color02 = losses.color_consistency_loss_func(src=generated['image02'], tgt=image0, w=validity_map_image0)
-        loss_color = loss_color01 + loss_color02
-
-        # Structural consistency loss function
-        loss_structure01 = losses.structural_consistency_loss_func(src=generated['image01'], tgt=image0, w=validity_map_image0)
-        loss_structure02 = losses.structural_consistency_loss_func(src=generated['image02'], tgt=image0, w=validity_map_image0)
-        loss_structure = loss_structure01 + loss_structure02
-
-        # Sparse depth consistency loss function
-        loss_sparse_depth = losses.sparse_depth_consistency_loss_func(src=generated['output_depth0'], tgt=sparse_depth0, w=filtered_validity_map_depth0)
-
-        # Local smoothness loss function
-        loss_smoothness = losses.smoothness_loss_func(predict=generated['output_depth0'], image=image0)
+        # todo: loss_e
+        loss_e = rel_depth - generated['ouput_depth']
 
         # l = w_{ph}l_{ph} + w_{sz}l_{sz} + w_{sm}l_{sm}
-        loss = loss_weights['w_color'] * loss_color + \
-               loss_weights['w_structure'] * loss_structure + \
-               loss_weights['w_sparse_depth'] * loss_sparse_depth + \
-               loss_weights['w_smoothness'] * loss_smoothness
+        loss = loss_weights['w_gt'] * loss_gt + loss_weights['w_e'] * loss_e
 
         loss_info = {
-            'loss' : loss,
-            'loss_color' : loss_color,
-            'loss_structure' : loss_structure,
-            'loss_sparse_depth' : loss_sparse_depth,
-            'loss_smoothness' : loss_smoothness,
+            'loss': loss,
+            'loss_gt': loss_gt,
+            'loss_e': loss_e
         }
 
         return loss, loss_info
@@ -230,9 +164,9 @@ class Train_net(torch.nn.Module):
         image, sparse_depth, intrinsics, validity_map_depth, ground_truth, gt_mask = \
             inputs['image'], inputs['sparse_depth'], inputs['intrinsics'], inputs['validity_map_depth'], inputs['ground_truth'], inputs['gt_mask']
         
-        self.depth_model.eval()
+        self.scale_model.eval()
         
-        output_depth_map = self.depth_model.forward(
+        output_depth_map = self.scale_model.forward(
             image=image,
             sparse_depth=sparse_depth,
             validity_map_depth=validity_map_depth,
@@ -255,8 +189,7 @@ class Train_net(torch.nn.Module):
 
 
     def scheduler_epoch_step(self):
-        self.scheduler_depth_model.step()
-        self.scheduler_pose_net.step()
+        self.scheduler_scale_model.step()
 
 
     def load_ckpt(self, pretrained_weights):
@@ -267,34 +200,26 @@ class Train_net(torch.nn.Module):
             logger.info(f"load model checkpoint: {model_path}")
             ckpt = torch.load(model_path, map_location=lambda storage, loc: storage)
 
-            depth_state_dict = {}
-            for key, value in ckpt['depth_model'].items():
+            scale_state_dict = {}
+            for key, value in ckpt['scale_model'].items():
                 new_key = key.replace('module.', '')  # 去掉 'module.' 前缀
-                depth_state_dict[new_key] = value
-
-            pose_state_dict = {}
-            for key, value in ckpt['pose_net'].items():
-                new_key = key.replace('module.', '')  # 去掉 'module.' 前缀
-                pose_state_dict[new_key] = value
+                scale_state_dict[new_key] = value
             
-
             # Load model states
-            m, u = self.depth_model.load_state_dict(depth_state_dict, strict=False)
-            logger.info(f"depth_model loaded, missing keys: {len(m)}, unexpected keys: {len(u)}")
-            m, u = self.pose_net.load_state_dict(pose_state_dict, strict=False)
-            logger.info(f"pose_net loaded, missing keys: {len(m)}, unexpected keys: {len(u)}")
-
+            m, u = self.scale_model.load_state_dict(scale_state_dict, strict=False)
+            logger.info(f"scale_model loaded, missing keys: {len(m)}, unexpected keys: {len(u)}")
+    
             # Load optimizer states
-            self.optimizer_depth_model.load_state_dict(ckpt['optimizer_depth_model'])
-            self.optimizer_pose_net.load_state_dict(ckpt['optimizer_pose_net'],)
-
+            self.optimizer_scale_model.load_state_dict(ckpt['optimizer_scale_model'])
+     
             # Load scheduler states
-            self.scheduler_depth_model.load_state_dict(ckpt['scheduler_depth_model'])
-            self.scheduler_pose_net.load_state_dict(ckpt['scheduler_pose_net'])
-
-
+            self.scheduler_scale_model.load_state_dict(ckpt['scheduler_scale_model'])
+  
             iter = ckpt.get('iter', 0)
             logger.info(f"iter loaded: {iter}")
+        
+        depth_anything_ckpt_path = pretrained_weights.get('depth_anything_ckpt', None)
+        self.depth_anything.load_state_dict(torch.load(depth_anything_ckpt_path))
         
         return iter
 
@@ -312,14 +237,12 @@ class Train_net(torch.nn.Module):
         ckpt = {
             'iter': iteration,
 
-            'depth_model': self.depth_model.state_dict(),
-            'pose_net': self.pose_net.state_dict(),
+            'scale_model': self.scale_model.state_dict(),
 
-            'optimizer_depth_model': self.optimizer_depth_model.state_dict(),
-            'optimizer_pose_net': self.optimizer_pose_net.state_dict(),
+            'optimizer_scale_model': self.optimizer_scale_model.state_dict(),
 
-            'scheduler_depth_model': self.scheduler_depth_model.state_dict(),
-            'scheduler_pose_net': self.scheduler_pose_net.state_dict()
+            'scheduler_scale_model': self.scheduler_scale_model.state_dict(),
+    
         }
 
         checkpoint_path = os.path.join(checkpoint_dir, f'ckpt_iter_{iteration}.pth')
