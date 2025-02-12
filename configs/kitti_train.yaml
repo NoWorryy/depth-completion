@@ -40,6 +40,7 @@ train_params:
   n_checkpoint: 1000
   n_summary: 1000
   n_summary_display: 4
+  n_test: 1000
   validation_start_step: 100000
   restore_path: null
 
@@ -51,6 +52,11 @@ train_params:
     random_remove_points: [0.60, 0.70]  # how much to remove from each sample
     random_noise_type: []
     random_noise_spread: -1
+  
+  # 分布式训练相关配置
+  mixed_precision_training: 'no'
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
 
 
 dataset_train_params:

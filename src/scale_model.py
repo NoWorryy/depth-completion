@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from blocks import _make_scratch, _make_fusion_block, Prefill
-print('scale_model')
 from spn import BasicDepthEncoder, Post_process_deconv
 
 

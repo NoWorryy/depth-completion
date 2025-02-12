@@ -9,12 +9,11 @@ from accelerate.utils import set_seed
 
 
 from scale_model import ScaleModel
-from net_utils import OutlierRemoval
+# from net_utils import OutlierRemoval
 from transforms import Transforms
 from depth_anything_v2.dpt import DepthAnythingV2
-import losses, net_utils, eval_utils
-print(torch.__version__)
-print(torch.cuda.is_available())
+import losses, eval_utils
+
 
 class Train_net(torch.nn.Module):
     """
@@ -31,6 +30,17 @@ class Train_net(torch.nn.Module):
 
         self.augmentation_schedule_pos = 0
         self.augmentation_probability = train_params['augmentation_probabilities'][0]
+
+        # Initialize the Accelerator
+        logger.info('Initializing the Accelerator:')
+        self.accelerator = Accelerator(
+            gradient_accumulation_steps=train_params['gradient_accumulation_steps'],
+            mixed_precision=train_params['mixed_precision_training'],
+            # log_with='tensorboard',
+            # project_dir=os.environ['SUMMARY_DIR']
+        )
+        logger.info('The accelerator Initialized.')
+        self.device = self.accelerator.device
 
         # 模型初始化
         logger.info('Initializing models:')
@@ -54,7 +64,7 @@ class Train_net(torch.nn.Module):
                                       use_prefill=model_params['scale_model_params']['use_prefill'],
                                       output_act='sigmoid')
         
-        self.outlier_removal = OutlierRemoval(**model_params['outlier_params'])
+        # self.outlier_removal = OutlierRemoval(**model_params['outlier_params'])
 
         self.depth_anything.to(self.device)
         self.scale_model.to(self.device)
@@ -79,10 +89,10 @@ class Train_net(torch.nn.Module):
         self.iter = self.load_ckpt(pretrained_weights)
         logger.info('Ckpt loaded.')
 
-        self.train_transforms = Transforms(**train_params['aug_params'])
+        # self.train_transforms = Transforms(**train_params['aug_params'])
 
-        self.scale_model = torch.nn.DataParallel(self.scale_model)
-        self.depth_anything = torch.nn.DataParallel(self.depth_anything)
+        # self.scale_model = torch.nn.DataParallel(self.scale_model)
+        # self.depth_anything = torch.nn.DataParallel(self.depth_anything)
 
 
     def train(self, inputs):
@@ -128,7 +138,8 @@ class Train_net(torch.nn.Module):
         # Compute loss function 
         loss, loss_info = self.compute_loss(generated, gt, rel_depth, self.train_params['loss_weights'])
         
-        loss.backward()
+        # loss.backward()
+        self.accelerator.backward(loss)
 
         self.optimizer_scale_model.step()
      
@@ -237,7 +248,7 @@ class Train_net(torch.nn.Module):
         ckpt = {
             'iter': iteration,
 
-            'scale_model': self.scale_model.state_dict(),
+            'scale_model': self.accelerator.unwrap_model(self.scale_model).state_dict(),
 
             'optimizer_scale_model': self.optimizer_scale_model.state_dict(),
 
