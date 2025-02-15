@@ -70,6 +70,15 @@ def main(device: str,
     # output setting
     folder_name = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     output_dir = os.path.join(train_params['output_dir'], folder_name)
+    event_path = os.path.join(output_dir, 'events')
+    log_path = os.path.join(output_dir, 'results.txt')
+
+    # training
+    train_data_length = len(dataloader)     # 72400 --> 3017
+    start_epoch = trainer.iter // train_data_length
+    max_epoch = train_params['learning_schedule'][-1]
+    max_train_steps = max_epoch * train_data_length
+    iteration = trainer.iter
 
     if trainer.accelerator.is_main_process:
         os.makedirs(output_dir, exist_ok=True)
@@ -77,26 +86,15 @@ def main(device: str,
         os.makedirs(f"{output_dir}/output_image", exist_ok=True)
         os.makedirs(f"{output_dir}/input_image", exist_ok=True)
         OmegaConf.save(args, os.path.join(output_dir, 'config.yaml'))
-    
-    event_path = os.path.join(output_dir, 'events')
-    log_path = os.path.join(output_dir, 'results.txt')
-    
-    # Set up tensorboard summary writers
-    if trainer.accelerator.is_main_process:
+
         tb_writer = SummaryWriter(log_dir = event_path)
+
+        progress_bar = tqdm(range(iteration, max_train_steps))
+        progress_bar.set_description("Steps")
+    
     else:
         tb_writer = None
-
-
-    # training
-    train_data_length = len(dataloader)     # 72400 --> 3017
-    start_epoch = trainer.iter // train_data_length
-    max_epoch = train_params['learning_schedule'][-1]
-    max_train_steps = max_epoch * train_data_length
-    global_step = trainer.iter
     
-    progress_bar = tqdm(range(global_step, max_train_steps))
-    progress_bar.set_description("Steps")
 
     logger.info(f'Begin training ------ train data length:{train_data_length}, max epoch:{max_epoch}, start_epoch:{start_epoch}')
     first_epoch = True
@@ -120,15 +118,17 @@ def main(device: str,
                     train_data_pair = torch.cat([image, sparse_depth.repeat(3,1,1), gt.repeat(3,1,1)], dim=1)
                     torchvision.utils.save_image(train_data_pair, f"{output_dir}/input_image/{f'train_data_pair-step{step}-{idx}'}.png")
                     
-            loss_info, generated = trainer.train(inputs)
+            loss_info, generated = trainer(inputs)
 
             losses = {key: value.mean().detach().data.cpu().numpy() for key, value in loss_info.items()}
             generated = {key: value.detach().cpu() for key, value in generated.items()}
             
+            iteration = epoch * train_data_length + step
+            
             if trainer.accelerator.sync_gradients and trainer.accelerator.is_main_process:
                 progress_bar.update(1)
-                global_step += 1
-                iteration = epoch * train_data_length + step
+                progress_bar.set_postfix(**{k: f"{v:.3f}" for k, v in losses.items()})
+                
 
                 tb_writer.add_scalar('lr', trainer.optimizer_scale_model.param_groups[0]['lr'], iteration)
 
@@ -140,16 +140,17 @@ def main(device: str,
                     trainer.save_checkpoint(os.path.join(output_dir, 'checkpoints'), iteration)
 
                     # 保存图像 这里都是(b, c, h, w)
-                    sparse_depth_color = colorize((inputs['sparse_depth'] / model_params['output_params']['max_predict_depth']).cpu(), colormap='viridis')
+                    sparse_depth_color = colorize((inputs['sparse_depth'].cpu() / model_params['output_params']['max_predict_depth']).cpu(), colormap='viridis')
                     output_depth_color = colorize((generated['output_depth'] / model_params['output_params']['max_predict_depth']).cpu(), colormap='viridis')
-                    gt_color = colorize((inputs['gt'] / model_params['output_params']['max_predict_depth']).cpu(), colormap='viridis')
+                    gt_color = colorize((inputs['gt'].cpu() / model_params['output_params']['max_predict_depth']).cpu(), colormap='viridis')
 
                     train_data_pair = torch.cat([
-                        inputs['image'], sparse_depth_color, output_depth_color, gt_color],
+                        inputs['image'].cpu(), sparse_depth_color, output_depth_color, gt_color],
                         dim = 2)
                     torchvision.utils.save_image(train_data_pair[:5, ...], f"{output_dir}/output_image/{f'train_data_pair-{iteration}'}.png")
                     tb_writer.add_images("train_img_sd_output_gt", train_data_pair[:5, ...], global_step=iteration)
-
+            
+            """
             if (iteration % train_params['n_test']) == 0:
                 mae, rmse, imae, irmse = [], [], [], []
 
@@ -187,8 +188,9 @@ def main(device: str,
                 irmse = np.mean(irmse)
                 
                 log(f'epoch:{epoch} iter:{iteration} ====> mae:{mae:.3f} rmse:{rmse:.3f} imae:{imae:.3f} irmse:{irmse:.3f}', log_path)
-
-            progress_bar.set_postfix(**{k: f"{v:.3f}" for k, v in losses.items()})
+            """
+            
+            
         
         trainer.scheduler_epoch_step()
         trainer.accelerator.wait_for_everyone()
@@ -198,7 +200,7 @@ def main(device: str,
 
 if __name__ == '__main__':
 
-    cfg_path = '/media/data2/libihan/codes/calibrated-backprojection-network/configs/kitti_train.yaml'
+    cfg_path = '/home/sbq/codes/depth-completion/configs/kitti_train.yaml'
     # with open(cfg_path, 'r') as fp:
     #     args = yaml.safe_load(fp)
 

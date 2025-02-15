@@ -158,10 +158,11 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
                 gt = np.expand_dims(gt, axis=-1)  # (h,w,c)
 
                 # Load camera intrinsics
-                intrinsics = np.load(entry['intrinsic']).astype(np.float32)
+                intrinsics = None
+                # intrinsics = np.load(entry['intrinsic']).astype(np.float32)
 
                 # Crop image, depth and adjust intrinsics
-                [image, sparse_depth, gt], intrinsics = random_crop(
+                [image, sparse_depth, gt] = random_crop(
                     inputs=[image, sparse_depth, gt],
                     shape=self.shape,
                     intrinsics=intrinsics,
@@ -170,7 +171,7 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
                 inputs = {
                     'image': self.transform(image),   # 0~1 （）
                     'sparse_depth': self.transform(sparse_depth), # 真实值
-                    'intrinsics': intrinsics.astype(np.float32),
+                    # 'intrinsics': intrinsics.astype(np.float32),
                     'gt': self.transform(gt)
                 }
 

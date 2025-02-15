@@ -3,7 +3,6 @@ from loguru import logger
 import torch
 from torch.optim.lr_scheduler import MultiStepLR
 import torch.nn.functional as F
-import accelerate
 from accelerate import Accelerator
 from accelerate.utils import set_seed
 
@@ -34,8 +33,8 @@ class Train_net(torch.nn.Module):
         # Initialize the Accelerator
         logger.info('Initializing the Accelerator:')
         self.accelerator = Accelerator(
-            gradient_accumulation_steps=train_params['gradient_accumulation_steps'],
-            mixed_precision=train_params['mixed_precision_training'],
+            # gradient_accumulation_steps=train_params['gradient_accumulation_steps'],
+            # mixed_precision=train_params['mixed_precision_training'],
             # log_with='tensorboard',
             # project_dir=os.environ['SUMMARY_DIR']
         )
@@ -95,7 +94,7 @@ class Train_net(torch.nn.Module):
         # self.depth_anything = torch.nn.DataParallel(self.depth_anything)
 
 
-    def train(self, inputs):
+    def forward(self, inputs):
         """
         param :
         return:
@@ -154,7 +153,7 @@ class Train_net(torch.nn.Module):
         loss_gt = torch.sum(torch.abs(generated['output_depth'] - gt ) * gt_mask) / valid_points
 
         # todo: loss_e
-        loss_e = rel_depth - generated['ouput_depth']
+        loss_e = torch.zeros_like(loss_gt)
 
         # l = w_{ph}l_{ph} + w_{sz}l_{sz} + w_{sm}l_{sm}
         loss = loss_weights['w_gt'] * loss_gt + loss_weights['w_e'] * loss_e

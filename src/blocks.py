@@ -37,7 +37,7 @@ class BpDist(Function):
 bpdist = BpDist.apply
     
 
-def _make_fusion_block(features, use_bn, size=None):
+def _make_fusion_block(features, use_bn, size=None, use_res1=True):
     return FeatureFusionDepthBlock(
         features,
         nn.ReLU(False),
@@ -46,6 +46,7 @@ def _make_fusion_block(features, use_bn, size=None):
         expand=False,
         align_corners=True,
         size=size,
+        use_res1=use_res1
     )
 
 
@@ -260,7 +261,7 @@ class FeatureFusionDepthBlock(nn.Module):
     """Feature fusion block.
     """
 
-    def __init__(self, features, activation, deconv=False, bn=False, expand=False, align_corners=True, size=None):
+    def __init__(self, features, activation, deconv=False, bn=False, expand=False, align_corners=True, size=None, use_res1=True):
         """Init.
 
         Args:
@@ -280,8 +281,12 @@ class FeatureFusionDepthBlock(nn.Module):
 
         self.out_conv = nn.Conv2d(
             features, out_features, kernel_size=1, stride=1, padding=0, bias=True, groups=1)
-
-        self.resConfUnit1 = ResidualConvUnit(features, activation, bn)
+        
+        if use_res1:
+            self.resConfUnit1 = ResidualConvUnit(features, activation, bn)
+        else:
+            self.resConfUnit1 = None
+        
         self.resConfUnit2 = ResidualConvUnit(features, activation, bn)
         self.resConfUnit_depth = nn.Sequential(
             nn.Conv2d(1, features, kernel_size=3, stride=1,
@@ -386,11 +391,13 @@ class Permute(nn.Module):
         super().__init__()
 
         self.conv = nn.Sequential(
-            Basic2dTrans(in_channels=in_channels, out_channels=in_channels, norm_layer=norm_layer, act=act),    # (B, C, 74, 246)
-            Basic2dTrans(in_channels=in_channels, out_channels=in_channels, norm_layer=norm_layer, act=act),    # (B, C, 148, 492)
-            Basic2dTrans(in_channels=in_channels, out_channels=in_channels, norm_layer=norm_layer, act=act),    # (B, C, 296, 984)
-            Conv1x1(in_channels, out_channels, bias=True)      # (B, 128, 296, 984)
+            # Basic2dTrans(in_channels=in_channels, out_channels=in_channels, norm_layer=norm_layer, act=act),    # (B, C, 74, 246)
+            # Basic2dTrans(in_channels=in_channels, out_channels=in_channels, norm_layer=norm_layer, act=act),    # (B, C, 148, 492)
+            # Basic2dTrans(in_channels=in_channels, out_channels=in_channels, norm_layer=norm_layer, act=act),    # (B, C, 296, 984)
+            # Conv1x1(in_channels, out_channels, bias=True)      # (B, 128, 296, 984)
+            Basic2d(in_channels=in_channels, out_channels=out_channels, norm_layer=norm_layer)
         )
+
 
     def forward(self, x):
         """
@@ -509,7 +516,7 @@ class Prefill(nn.Module):
         Sp:     (B, 1, 256, 1216)
         fout:   (B, Ci, 37, 123)
         """
-        W = self.permute(fout)  # (B, ci, 296, 984)  *8倍
+        W = self.permute(fout)  # (B, ci, 296, 1400)  *8倍
         fi = F.interpolate(W, Sp.shape[2:], mode="bilinear", align_corners=True)     # (B, ci, H, W)
 
         B, _, height, width = Sp.shape

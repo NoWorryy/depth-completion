@@ -36,7 +36,7 @@ train_params:
     w_gt: 1
     w_e: 0.2 
 
-  output_dir: 'trained_kbnet/kitti'
+  output_dir: 'ckpt/kitti'
   n_checkpoint: 1000
   n_summary: 1000
   n_summary_display: 4
@@ -62,11 +62,11 @@ train_params:
 dataset_train_params:
   shape: [256, 1216, 3]
   RandCrop: false
-  train_file_path : 'configs/kitti_reldepth.json'
+  train_file_path : 'configs/my_kitti_52.json'
 
 
 dataset_val_params:
-  val_file_path: 'configs/kitti_reldepth.json'
+  val_file_path: 'configs/my_kitti_52.json'
 
   min_evaluate_depth: 0.0 
   max_evaluate_depth: 100.0 
@@ -74,4 +74,4 @@ dataset_val_params:
 
 pretrained_weights:
   model_path:
-  depth_anything_ckpt: '/media/data2/libihan/codes/Depth-Anything-V2/checkpoints/depth_anything_v2_vitb.pth'
+  depth_anything_ckpt: '/home/sbq/codes/depth-completion/pretrained_models/depth_anything_v2_vitb.pth'

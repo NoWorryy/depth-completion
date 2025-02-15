@@ -80,7 +80,7 @@ class ScaleModel(nn.Module):
         self.scratch.refinenet3 = _make_fusion_block(
             features, use_bn)
         self.scratch.refinenet4 = _make_fusion_block(
-            features, use_bn)
+            features, use_bn, use_res1=False)
 
         head_features_1 = features
         head_features_2 = 32
@@ -114,9 +114,9 @@ class ScaleModel(nn.Module):
         
         if self.use_prefill:
             self.prefill1 = Prefill(in_ch=out_channels[0], out_ch=32, level=1)
-            self.prefill2 = Prefill(in_ch=out_channels[1], out_ch=64, level=2)
-            self.prefill3 = Prefill(in_ch=out_channels[2], out_ch=128, level=3)
-            self.prefill4 = Prefill(in_ch=out_channels[3], out_ch=256, level=4)
+            self.prefill2 = Prefill(in_ch=out_channels[1], out_ch=32, level=2)
+            self.prefill3 = Prefill(in_ch=out_channels[2], out_ch=32, level=3)
+            self.prefill4 = Prefill(in_ch=out_channels[3], out_ch=32, level=4)
 
 
     def forward(self, out_features, patch_h, patch_w, sparse_scale=None, certainty=None, img_size=(256, 1216)):
@@ -174,6 +174,6 @@ class ScaleModel(nn.Module):
             weight, offset = self.weight_offset(out, out_feat)
             out = self.Post_process(out, weight, offset)
 
-        ouput_scale = F.interpolate(ouput_scale[:, None], img_size, mode="bilinear", align_corners=True)
+        ouput_scale = F.interpolate(out, img_size, mode="bilinear", align_corners=True)
                
-        return out
+        return ouput_scale

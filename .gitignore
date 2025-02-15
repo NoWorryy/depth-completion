@@ -2,7 +2,8 @@ data
 outputs
 plots
 pretrained_models
-src/__pycache__
+__pycache__/
+**/__pycache__/
 tools/_jupyter/.ipynb_checkpoints
 training
 validation
@@ -11,3 +12,4 @@ trained_kbnet
 kitti_depth
 configs/*.json
 mid/
+ckpt/
