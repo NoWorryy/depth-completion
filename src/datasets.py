@@ -87,53 +87,6 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
         with open(train_file_path, 'r') as file:
             self.dataset = json.load(file)['train']
 
-    '''
-    def __getitem__(self, index):
-        try_cnt = 0
-        while True:
-            try:
-                try_cnt += 1
-                if try_cnt > 10:
-                    break
-
-                # Load image
-                images = Image.open(self.image_paths[index]).convert('RGB')
-                images = np.array(images)   # (h, 3w, c)
-                image1, image0, image2 = np.split(images, indices_or_sections=3, axis=1)   # (h, w, c)
-
-                # Load depth
-                z = np.array(Image.open(self.sparse_depth_paths[index]), dtype=np.float32)
-                z = z / 256.0   # Assert 16-bit (not 8-bit) depth map
-                z[z <= 0] = 0.0
-                sparse_depth0 = np.expand_dims(z, axis=-1)  # (h,w,c)
-
-
-                # Load camera intrinsics
-                intrinsics = np.load(self.intrinsics_paths[index]).astype(np.float32)
-
-                # Crop image, depth and adjust intrinsics
-                if self.RandCrop:
-                    [image0, image1, image2, sparse_depth0], intrinsics = random_crop(
-                        inputs=[image0, image1, image2, sparse_depth0],
-                        shape=self.shape,
-                        intrinsics=intrinsics,
-                        RandCrop=self.RandCrop)
-                    
-                inputs = {
-                    'image0': self.transform(image0),   # 0~1 （）
-                    'image1': self.transform(image1),
-                    'image2': self.transform(image2),
-                    'sparse_depth0': self.transform(sparse_depth0), # 真实值
-                    'intrinsics': intrinsics.astype(np.float32)
-                }
-
-                return inputs
-            except Exception as e:
-                print(f"read idx:{index}, {self.image_paths[index]} error, try_time:{try_cnt}, {type(e).__name__}: {e}")
-                print(traceback.format_exc())
-                index = random.randint(0,  len(self.image_paths) - 1)
-    '''
-
     
     def __getitem__(self, index):
         try_cnt = 0
@@ -226,9 +179,6 @@ class KBNetInferenceDataset(torch.utils.data.Dataset):
         z = np.array(Image.open(entry['sparse_depth']), dtype=np.float32) / 256.0   # Assert 16-bit (not 8-bit) depth map
         z[z <= 0] = 0.0
         sparse_depth = np.expand_dims(z, axis=-1)  # (h,w,c)
-        v = z.astype(np.float32)
-        v[z > 0] = 1.0
-        validity_map_depth = np.expand_dims(v, axis=-1)  # (h,w,c)
 
         # Load camera intrinsics
         intrinsics = np.reshape(np.loadtxt(entry['intrinsic']), (3, 3))
@@ -238,19 +188,12 @@ class KBNetInferenceDataset(torch.utils.data.Dataset):
         z = z / 256.0   # Assert 16-bit (not 8-bit) depth map
         z[z <= 0] = 0.0
         ground_truth = np.expand_dims(z, axis=-1)  # (h,w,c)
-        v = z.astype(np.float32)
-        v[z > 0] = 1.0
-        validity_map_gt = np.expand_dims(v, axis=-1)  # (h,w,c)
-
-        gt_mask = (ground_truth > self.min_evaluate_depth) & (ground_truth < self.max_evaluate_depth) & validity_map_gt.astype(bool)
 
         inputs = {
             'image': self.transform(image),
             'sparse_depth': self.transform(sparse_depth),
             'intrinsics': intrinsics.astype(np.float32),
-            'validity_map_depth': self.transform(validity_map_depth),
             'ground_truth': self.transform(ground_truth),
-            'gt_mask': gt_mask.transpose(2, 0, 1)
         }
 
         return inputs
@@ -263,15 +206,16 @@ class KBNetInferenceDataset(torch.utils.data.Dataset):
     
 if __name__ == '__main__':
     from omegaconf import OmegaConf
-    cfg_path = '/media/data2/libihan/codes/calibrated-backprojection-network/configs/kitti_train.yaml'
+    cfg_path = '/home/sbq/codes/depth-completion/configs/kitti_train.yaml'
 
     args = OmegaConf.load(cfg_path)
-    print(args['dataset_train_params'])
+    print(args['dataset_val_params'])
     
-    dataset = KBNetTrainingDataset(**args['dataset_train_params'])
-    # dataset = KBNetInferenceDataset(**args['dataset_val_params'])
+    # dataset = KBNetTrainingDataset(**args['dataset_train_params'])
+    dataset = KBNetInferenceDataset(**args['dataset_val_params'])
     print(len(dataset))
 
     for i in range(len(dataset)):
         inputs = dataset[i]
-        
+        if i == 2:
+            break

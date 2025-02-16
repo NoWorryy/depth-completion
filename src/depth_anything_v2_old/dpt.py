@@ -110,7 +110,8 @@ class DPTHead(nn.Module):
             nn.Conv2d(head_features_1 // 2, head_features_2, kernel_size=3, stride=1, padding=1),
             nn.ReLU(True),
             nn.Conv2d(head_features_2, 1, kernel_size=1, stride=1, padding=0),
-            nn.Sigmoid()
+            nn.ReLU(True),
+            nn.Identity(),
         )
     
     def forward(self, out_features, patch_h, patch_w):
@@ -157,8 +158,7 @@ class DepthAnythingV2(nn.Module):
         features=256, 
         out_channels=[256, 512, 1024, 1024], 
         use_bn=False, 
-        use_clstoken=False,
-        max_depth=20.0
+        use_clstoken=False
     ):
         super(DepthAnythingV2, self).__init__()
         
@@ -168,8 +168,6 @@ class DepthAnythingV2(nn.Module):
             'vitl': [4, 11, 17, 23], 
             'vitg': [9, 19, 29, 39]
         }
-        
-        self.max_depth = max_depth
         
         self.encoder = encoder
         self.pretrained = DINOv2(model_name=encoder)
@@ -181,48 +179,23 @@ class DepthAnythingV2(nn.Module):
         
         features = self.pretrained.get_intermediate_layers(x, self.intermediate_layer_idx[self.encoder], return_class_token=True)
         
-        depth = self.depth_head(features, patch_h, patch_w) # * self.max_depth
+        depth = self.depth_head(features, patch_h, patch_w)
+        depth = F.relu(depth)
         
         return depth, features
     
     @torch.no_grad()
-    def infer_image(self, raw_image, input_size=518):
-        # image, (h, w) = self.image2tensor(raw_image, input_size)
-        raw_img_size = raw_image.shape[2:]
-        image = self.resize_image(raw_image, input_size)
+    def infer_image(self, image, input_size=518):
+        
+        img_size = image.shape[2:]
+        image = self.resize_image(image, input_size)
 
-        depth, features = self.forward(image)
+        depth, img_feat  = self.forward(image)
         
-        depth = F.interpolate(depth, raw_img_size, mode="bilinear", align_corners=True)
+        depth = F.interpolate(depth, img_size, mode="bilinear", align_corners=True)
         
-        return depth, features, image.shape[2:]
+        return depth, img_feat, img_size
     
-    def image2tensor(self, raw_image, input_size=518):        
-        transform = Compose([
-            Resize(
-                width=input_size,
-                height=input_size,
-                resize_target=False,
-                keep_aspect_ratio=True,
-                ensure_multiple_of=14,
-                resize_method='lower_bound',
-                image_interpolation_method=cv2.INTER_CUBIC,
-            ),
-            NormalizeImage(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            PrepareForNet(),
-        ])
-        
-        h, w = raw_image.shape[:2]
-        
-        image = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB) / 255.0
-        
-        image = transform({'image': image})['image']
-        image = torch.from_numpy(image).unsqueeze(0)
-        
-        DEVICE = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
-        image = image.to(DEVICE)
-        
-        return image, (h, w)
     
     def resize_image(self, image, input_size=518):
         '''

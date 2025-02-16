@@ -115,8 +115,8 @@ class ScaleModel(nn.Module):
         if self.use_prefill:
             self.prefill1 = Prefill(in_ch=out_channels[0], out_ch=32, level=1)
             self.prefill2 = Prefill(in_ch=out_channels[1], out_ch=32, level=2)
-            self.prefill3 = Prefill(in_ch=out_channels[2], out_ch=32, level=3)
-            self.prefill4 = Prefill(in_ch=out_channels[3], out_ch=32, level=4)
+            self.prefill3 = Prefill(in_ch=out_channels[2], out_ch=64, level=3)
+            self.prefill4 = Prefill(in_ch=out_channels[3], out_ch=64, level=4)
 
 
     def forward(self, out_features, patch_h, patch_w, sparse_scale=None, certainty=None, img_size=(256, 1216)):

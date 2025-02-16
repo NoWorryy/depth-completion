@@ -60,6 +60,12 @@ def inv_root_mean_sq_err(src, tgt):
         float : inverse root mean squared error
     '''
 
+    mask = tgt==0
+    tgt[mask] = 1e-6
+
+    mask_src = src==0
+    src[mask_src] = 1e-6
+
     return np.sqrt(np.mean(((1.0 / tgt) - (1.0 / src)) ** 2))
 
 def inv_mean_abs_err(src, tgt):
@@ -74,6 +80,12 @@ def inv_mean_abs_err(src, tgt):
     Returns:
         float : inverse mean absolute error
     '''
+
+    mask = tgt==0
+    tgt[mask] = 1e-6
+
+    mask_src = src==0
+    src[mask_src] = 1e-6
 
     return np.mean(np.abs((1.0 / tgt) - (1.0 / src)))
 
@@ -90,5 +102,8 @@ def mean_abs_rel_err(src, tgt):
     Returns:
         float : mean absolute relative error between source and target
     '''
+
+    mask = tgt==0
+    tgt[mask] = 1e-6
 
     return np.mean(np.abs(src - tgt) / tgt)

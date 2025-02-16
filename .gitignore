@@ -13,3 +13,4 @@ kitti_depth
 configs/*.json
 mid/
 ckpt/
+src/depth_anything_v2/__pycache__

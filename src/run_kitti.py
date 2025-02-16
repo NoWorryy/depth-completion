@@ -1,8 +1,6 @@
 import os
 import torch
 import torchvision
-import matplotlib
-import cv2
 from tqdm.auto import tqdm
 import datetime
 import numpy as np
@@ -93,8 +91,6 @@ def main(device: str,
 
         progress_bar = tqdm(range(iteration, max_train_steps))
         progress_bar.set_description("Steps")
-
-        cmap = matplotlib.colormaps.get_cmap('Spectral')
     
     else:
         tb_writer = None
@@ -117,9 +113,8 @@ def main(device: str,
                 first_epoch = False
                 for idx, (image, sparse_depth, gt) in \
                     enumerate(zip(inputs['image'], inputs['sparse_depth'], inputs['gt'])):
+
                     # concat source and driving image
-                    sparse_depth = (sparse_depth - sparse_depth.min()) / (sparse_depth.max() - sparse_depth.min())
-                    gt = (gt - gt.min()) / (gt.max() - gt.min())
                     train_data_pair = torch.cat([image, sparse_depth.repeat(3,1,1), gt.repeat(3,1,1)], dim=1)
                     torchvision.utils.save_image(train_data_pair, f"{output_dir}/input_image/{f'train_data_pair-step{step}-{idx}'}.png")
                     
@@ -135,79 +130,8 @@ def main(device: str,
                 progress_bar.set_postfix(**{k: f"{v:.3f}" for k, v in losses.items()})
                 
 
-                tb_writer.add_scalar('lr', trainer.optimizer_scale_model.param_groups[0]['lr'], iteration)
-
-                # write to tensorboard
-                write_loss(iteration, tb_writer, losses)
 
 
-                if (iteration % train_params['n_summary']) == 0:
-                    trainer.save_checkpoint(os.path.join(output_dir, 'checkpoints'), iteration)
-
-                    # 保存图像 这里都是(b, c, h, w)
-                    img = inputs['image'][0].detach().cpu().numpy().tranpose(1,2,0)
-
-                    sd = inputs['sparse_depth'][0].detach().cpu().numpy().tranpose(1,2,0)
-                    sd = (sd - sd.min()) / (sd.max() - sd.min()) * 255.0
-                    sd = (cmap(sd)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
-
-                    output_depth = generated['output_depth'].detach().cpu().numpy().tranpose(1,2,0)
-                    output_depth = (output_depth - output_depth.min()) / (output_depth.max() - output_depth.min()) * 255.0
-                    output_depth = (cmap(output_depth)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
-
-                    gt = inputs['gt'][0].detach().cpu().numpy().tranpose(1,2,0)
-                    gt = (gt - gt.min()) / (gt.max() - gt.min()) * 255.0
-                    gt = (cmap(gt)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
-
-                    train_data_pair = np.concatenate((img, sd, output_depth, gt), axis=0)
-                    cv2.imwrite(f"{output_dir}/output_image/{f'train_img_sd_output_gt-{iteration}'}.png", train_data_pair)
-
-            
-            # if trainer.accelerator.is_main_process and (iteration % train_params['n_test']) == 0:
-            #     mae, rmse, imae, irmse = [], [], [], []
-
-            #     for idx, inputs in enumerate(val_dataloader):
-            #         # inputs = {key: value.to(device) for key, value in inputs.items()}
-            #         metrics, generated_val = trainer.validate(inputs)
-            #         generated_val = {key: value.detach().cpu() for key, value in generated_val.items()}
-
-            #         mae.append(metrics['mae'])
-            #         rmse.append(metrics['rmse'])
-            #         imae.append(metrics['imae'])
-            #         irmse.append(metrics['irmse'])
-
-            #         if idx == 0 and trainer.accelerator.sync_gradients and trainer.accelerator.is_main_process:    # 保存第一个batch的图片
-            #             sparse_depth_color = colorize((inputs['sparse_depth'] / model_params['depth_model_params']['max_predict_depth']).cpu(), colormap='viridis')
-            #             output_depth_color = colorize((generated_val['output_depth'] / model_params['depth_model_params']['max_predict_depth']).cpu(), colormap='viridis')
-                        
-            #             gt_error_abs = torch.abs(generated_val['output_depth'] - inputs['ground_truth'])
-            #             gt_error_rel = torch.where(
-            #                 inputs['gt_mask'],
-            #                 (gt_error_abs + EPSILON) / (inputs['ground_truth'] + EPSILON),
-            #                 torch.zeros_like(gt_error_abs))
-                        
-            #             gt_error_color = colorize(gt_error_rel.cpu(), colormap='inferno')
-
-            #             val_data_pair = torch.cat([
-            #                 sparse_depth_color, inputs['image'], output_depth_color, gt_error_color],
-            #                 dim = 2)
-            #             torchvision.utils.save_image(val_data_pair[:5, ...], f"{output_dir}/output_image/{f'val_data_pair-{iteration}'}.png")
-            #             tb_writer.add_images("val_sparse_image_dense_error", val_data_pair[:5, ...], global_step=iteration)
-
-            #     mae   = np.mean(mae)
-            #     rmse  = np.mean(rmse)
-            #     imae  = np.mean(imae)
-            #     irmse = np.mean(irmse)
-                
-            #     log(f'epoch:{epoch} iter:{iteration} ====> mae:{mae:.3f} rmse:{rmse:.3f} imae:{imae:.3f} irmse:{irmse:.3f}', log_path)
-            
-            
-            
-        
-        trainer.scheduler_epoch_step()
-        trainer.accelerator.wait_for_everyone()
-    
-    trainer.accelerator.end_training()
 
 
 if __name__ == '__main__':

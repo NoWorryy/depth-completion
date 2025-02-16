@@ -27,20 +27,19 @@ train_params:
   lr_scale: 2.0e-4
   # learning_rates: [0.5e-4, 1.0e-4, 1.5e-4, 1.0e-4, 0.5e-4, 0.2e-4] # 对应epoch
   # learning_schedule: [2, 8, 20, 30, 45, 60]
-  learning_schedule: [2, 30, 45, 60]
+  learning_schedule: [2, 10, 20, 30]
 
   patch_size: 14
 
   loss_weights:
     # Loss function settings
     w_gt: 1
-    w_e: 0.2 
+    w_e: 0.3
 
   output_dir: 'ckpt/kitti'
-  n_checkpoint: 1000
-  n_summary: 1000
+  n_summary: 8000
   n_summary_display: 4
-  n_test: 1000
+  n_test: 5000
   validation_start_step: 100000
   restore_path: null
 
@@ -73,5 +72,5 @@ dataset_val_params:
 
 
 pretrained_weights:
-  model_path:
-  depth_anything_ckpt: '/home/sbq/codes/depth-completion/pretrained_models/depth_anything_v2_vitb.pth'
+  model_path: 
+  depth_anything_ckpt: '/home/sbq/codes/Depth-Anything-V2/metric_depth/ckpt/depth_anything_v2_metric_vkitti_vitb.pth'
