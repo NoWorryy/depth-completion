@@ -137,12 +137,13 @@ class Train_net(torch.nn.Module):
 
         patch_h = resize_h // 14
         patch_w = resize_w // 14   # (B, n, d)
-        ouput_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
-        # ouput_scale = F.interpolate(ouput_scale[:, None], image.shape[2:], mode="bilinear", align_corners=True)     # (B, H, W)
+        output_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
+        # output_scale = F.interpolate(output_scale[:, None], image.shape[2:], mode="bilinear", align_corners=True)     # (B, H, W)
 
-        output_depth = torch.mul(ouput_scale, rel_depth)
+        output_depth = torch.mul(output_scale, rel_depth)
         generated = {
-            'ouput_scale': ouput_scale, 
+            'rel_depth': rel_depth,
+            'output_scale': output_scale, 
             'output_depth': output_depth
         }
 
@@ -238,11 +239,11 @@ class Train_net(torch.nn.Module):
 
         patch_h = resize_h // 14
         patch_w = resize_w // 14   # (B, n, d)
-        ouput_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
+        output_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
   
-        output_depth = torch.mul(ouput_scale, rel_depth)
+        output_depth = torch.mul(output_scale, rel_depth)
         generated = {
-            'ouput_scale': ouput_scale, 
+            'output_scale': output_scale, 
             'output_depth': output_depth
         }
 

@@ -94,7 +94,7 @@ def main(device: str,
         progress_bar = tqdm(range(iteration, max_train_steps))
         progress_bar.set_description("Steps")
 
-        cmap = matplotlib.colormaps.get_cmap('Spectral')
+        cmap = matplotlib.colormaps.get_cmap('Spectral_r')
     
     else:
         tb_writer = None
@@ -145,21 +145,29 @@ def main(device: str,
                     trainer.save_checkpoint(os.path.join(output_dir, 'checkpoints'), iteration)
 
                     # 保存图像 这里都是(b, c, h, w)
-                    img = inputs['image'][0].detach().cpu().numpy().tranpose(1,2,0)
+                    img = inputs['image'][0].permute(1,2,0).detach().cpu().numpy()
 
-                    sd = inputs['sparse_depth'][0].detach().cpu().numpy().tranpose(1,2,0)
+                    sd = inputs['sparse_depth'][0].squeeze(0).detach().cpu().numpy()
                     sd = (sd - sd.min()) / (sd.max() - sd.min()) * 255.0
-                    sd = (cmap(sd)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+                    sd = (cmap(sd.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
-                    output_depth = generated['output_depth'].detach().cpu().numpy().tranpose(1,2,0)
+                    rel_depth = generated['rel_depth'][0].squeeze(0).detach().cpu().numpy()
+                    rel_depth = (rel_depth - rel_depth.min()) / (rel_depth.max() - rel_depth.min()) * 255.0
+                    rel_depth = (cmap(rel_depth.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+
+                    output_depth = generated['output_depth'][0].squeeze(0).detach().cpu().numpy()
                     output_depth = (output_depth - output_depth.min()) / (output_depth.max() - output_depth.min()) * 255.0
-                    output_depth = (cmap(output_depth)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+                    output_depth = (cmap(output_depth.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
-                    gt = inputs['gt'][0].detach().cpu().numpy().tranpose(1,2,0)
+                    output_scale = generated['output_scale'][0].squeeze(0).detach().cpu().numpy()
+                    output_scale = (output_scale - output_scale.min()) / (output_scale.max() - output_scale.min()) * 255.0
+                    output_scale = (cmap(output_scale.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+
+                    gt = inputs['gt'][0].squeeze(0).detach().cpu().numpy()
                     gt = (gt - gt.min()) / (gt.max() - gt.min()) * 255.0
-                    gt = (cmap(gt)[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+                    gt = (cmap(gt.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
-                    train_data_pair = np.concatenate((img, sd, output_depth, gt), axis=0)
+                    train_data_pair = np.concatenate((img, sd, rel_depth, output_scale, output_depth, gt), axis=0)
                     cv2.imwrite(f"{output_dir}/output_image/{f'train_img_sd_output_gt-{iteration}'}.png", train_data_pair)
 
             
