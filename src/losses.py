@@ -15,6 +15,7 @@ https://arxiv.org/pdf/2108.10531.pdf
 }
 '''
 import torch
+import torch.nn as nn
 
 
 EPSILON = 1e-8
@@ -156,3 +157,44 @@ def ssim(x, y):
     score = numer / denom
 
     return torch.clamp((1.0 - score) / 2.0, 0.0, 1.0)
+
+class L1Loss(nn.Module):
+    def __init__(self, max_depth):
+        super(L1Loss, self).__init__()
+
+        self.max_depth = max_depth
+        self.t_valid = 0.0001
+
+    def forward(self, pred, gt):
+        gt = torch.clamp(gt, min=0, max=self.max_depth)
+        pred = torch.clamp(pred, min=0, max=self.max_depth)
+
+        mask = (gt > self.t_valid).type_as(pred).detach()
+
+        d = torch.abs(pred - gt) * mask
+
+        d = torch.sum(d, dim=[1, 2, 3])
+        num_valid = torch.sum(mask, dim=[1, 2, 3])
+
+        loss = d / (num_valid + 1e-8)
+
+        loss = loss.sum()
+
+        return loss
+
+def l1loss(pred, gt, max_depth):
+    gt = torch.clamp(gt, min=0, max=max_depth)
+    pred = torch.clamp(pred, min=0, max=max_depth)
+
+    mask = (gt > 0.0001).type_as(pred).detach()
+
+    d = torch.abs(pred - gt) * mask
+
+    d = torch.sum(d, dim=[1, 2, 3])
+    num_valid = torch.sum(mask, dim=[1, 2, 3])
+
+    loss = d / (num_valid + 1e-8)
+
+    loss = loss.mean()
+
+    return loss

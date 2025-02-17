@@ -182,16 +182,22 @@ class Train_net(torch.nn.Module):
 
 
     def compute_loss(self, output_depth, gt, rel_depth, loss_weights):
+        # loss_gt
+        # gt_mask = (gt > 1e-3)
+        # valid_points = gt_mask.sum()
+        # loss_gt = torch.sum(torch.abs(output_depth - gt ) * gt_mask) / (valid_points + 1e-6)
 
-        gt_mask = (gt > 1e-3)
-        valid_points = gt_mask.sum()
-        loss_gt = torch.sum(torch.abs(output_depth - gt ) * gt_mask) / (valid_points + 1e-6)
+        loss_gt = losses.l1loss(pred=output_depth, gt=gt, max_depth=90)
 
-        # todo: loss_e
-        output_depth_norm = (output_depth - output_depth.min()) / (output_depth.max() - output_depth.min())
+        # loss_e
+        output_depth_norm = torch.zeros_like(output_depth)
+        for i, od in enumerate(output_depth):
+            output_depth_norm[i] = (od - od.min()) / (od.max() - od.min())
         grad_x_gen, grad_y_gen = self.compute_gradients(output_depth_norm)
 
-        rel_depth_norm = (rel_depth - rel_depth.min()) / (rel_depth.max() - rel_depth.min())
+        rel_depth_norm = torch.zeros_like(rel_depth)
+        for i, rd in enumerate(rel_depth):
+            rel_depth_norm[i] = (rd - rd.min()) / (rd.max() - rd.min())
         grad_x_target, grad_y_target = self.compute_gradients(rel_depth_norm)
 
         loss_x = torch.abs(grad_x_gen - grad_x_target)

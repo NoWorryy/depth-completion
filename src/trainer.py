@@ -65,9 +65,13 @@ def main(device: str,
                         pretrained_weights = pretrained_weights)
 
     # trainer = torch.nn.DataParallel(trainer)
-    trainer.depth_anything, trainer.scale_model, trainer.optimizer_scale_modell, dataloader, val_dataloader = trainer.accelerator.prepare(
+    trainer.depth_anything, trainer.scale_model, trainer.optimizer_scale_model, dataloader, val_dataloader = trainer.accelerator.prepare(
         trainer.depth_anything, trainer.scale_model, trainer.optimizer_scale_model, dataloader, val_dataloader)
     # trainer.accelerator.register_for_checkpointing(trainer.scheduler_scale_model)
+
+    if torch.cuda.device_count() > 1:
+        trainer.depth_anything = torch.nn.SyncBatchNorm.convert_sync_batchnorm(trainer.depth_anything)
+        trainer.scale_model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(trainer.scale_model)
 
     # output setting
     folder_name = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
