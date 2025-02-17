@@ -58,7 +58,7 @@ class Train_net(torch.nn.Module):
                                       in_channels=scale_config['embed_dim'],
                                       features=scale_config['features'],
                                       out_channels=scale_config['out_channels'],
-                                      use_bn=False,
+                                      use_bn=True,
                                       use_clstoken=False,
                                       use_prefill=model_params['scale_model_params']['use_prefill'],
                                       output_act='sigmoid')
@@ -100,7 +100,7 @@ class Train_net(torch.nn.Module):
         return:
         """
         # Set models to training mode
-        self.depth_anything.eval()
+        self.depth_anything.train()
         self.depth_anything.requires_grad_(False)
 
         self.scale_model.train()
@@ -183,14 +183,16 @@ class Train_net(torch.nn.Module):
 
     def compute_loss(self, output_depth, gt, rel_depth, loss_weights):
 
-        gt_mask = (gt != 0)
+        gt_mask = (gt > 1e-3)
         valid_points = gt_mask.sum()
         loss_gt = torch.sum(torch.abs(output_depth - gt ) * gt_mask) / (valid_points + 1e-6)
 
         # todo: loss_e
         output_depth_norm = (output_depth - output_depth.min()) / (output_depth.max() - output_depth.min())
         grad_x_gen, grad_y_gen = self.compute_gradients(output_depth_norm)
-        grad_x_target, grad_y_target = self.compute_gradients(rel_depth)
+
+        rel_depth_norm = (rel_depth - rel_depth.min()) / (rel_depth.max() - rel_depth.min())
+        grad_x_target, grad_y_target = self.compute_gradients(rel_depth_norm)
 
         loss_x = torch.abs(grad_x_gen - grad_x_target)
         loss_y = torch.abs(grad_y_gen - grad_y_target)

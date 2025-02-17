@@ -19,7 +19,7 @@ model_params:
 
 # Training settings
 train_params:
-  n_batch: 1
+  n_batch: 3
   n_height: 256
   n_width: 1216
   n_thread: 24
@@ -37,7 +37,8 @@ train_params:
     w_e: 0.3
 
   output_dir: 'ckpt/kitti'
-  n_summary: 8000
+  n_ckpt: 3000
+  n_img: 100
   n_summary_display: 4
   n_test: 5000
   validation_start_step: 100000
@@ -72,5 +73,5 @@ dataset_val_params:
 
 
 pretrained_weights:
-  model_path: '/home/sbq/codes/depth-completion/ckpt/kitti/2025-02-16T19-08-19/checkpoints/ckpt_iter_16000.pth'
+  model_path: 
   depth_anything_ckpt: '/home/sbq/codes/Depth-Anything-V2/metric_depth/ckpt/depth_anything_v2_metric_vkitti_vitb.pth'

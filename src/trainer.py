@@ -139,10 +139,11 @@ def main(device: str,
 
                 # write to tensorboard
                 write_loss(iteration, tb_writer, losses)
-
-
-                if (iteration % train_params['n_summary']) == 0:
+                
+                if (iteration % train_params['n_ckpt']) == 0:
                     trainer.save_checkpoint(os.path.join(output_dir, 'checkpoints'), iteration)
+
+                if (iteration % train_params['n_img']) == 0:
 
                     # 保存图像 这里都是(b, c, h, w)
                     img = inputs['image'][0].permute(1,2,0).detach().cpu().numpy()
@@ -169,6 +170,14 @@ def main(device: str,
 
                     train_data_pair = np.concatenate((img, sd, rel_depth, output_scale, output_depth, gt), axis=0)
                     cv2.imwrite(f"{output_dir}/output_image/{f'train_img_sd_output_gt-{iteration}'}.png", train_data_pair)
+                
+                for name, param in trainer.named_parameters():
+                    if param.grad is not None:
+                        grad_norm = param.grad.norm()
+                        if grad_norm < 1e-6:
+                            print(f"Gradient vanishing detected at layer {name}")
+                        if grad_norm > 1e6:
+                            print(f"Gradient explosion detected at layer {name}")
 
             
             # if trainer.accelerator.is_main_process and (iteration % train_params['n_test']) == 0:

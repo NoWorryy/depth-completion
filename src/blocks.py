@@ -99,17 +99,27 @@ class ResidualConvUnit(nn.Module):
 
         self.groups = 1
 
-        self.conv1 = nn.Conv2d(
-            features, features, kernel_size=3, stride=1, padding=1, bias=True, groups=self.groups
-        )
-
-        self.conv2 = nn.Conv2d(
-            features, features, kernel_size=3, stride=1, padding=1, bias=True, groups=self.groups
-        )
+        
 
         if self.bn == True:
+            self.conv1 = nn.Conv2d(
+            features, features, kernel_size=3, stride=1, padding=1, bias=False, groups=self.groups
+            )
+
+            self.conv2 = nn.Conv2d(
+                features, features, kernel_size=3, stride=1, padding=1, bias=False, groups=self.groups
+            )
             self.bn1 = nn.BatchNorm2d(features)
             self.bn2 = nn.BatchNorm2d(features)
+        
+        else:
+            self.conv1 = nn.Conv2d(
+            features, features, kernel_size=3, stride=1, padding=1, bias=True, groups=self.groups
+            )
+
+            self.conv2 = nn.Conv2d(
+                features, features, kernel_size=3, stride=1, padding=1, bias=True, groups=self.groups
+            )
 
         self.activation = activation
 
@@ -290,15 +300,17 @@ class FeatureFusionDepthBlock(nn.Module):
         self.resConfUnit2 = ResidualConvUnit(features, activation, bn)
         self.resConfUnit_depth = nn.Sequential(
             nn.Conv2d(2, features, kernel_size=3, stride=1,
-                      padding=1, bias=True, groups=1),
+                      padding=1, bias=False, groups=1),
+            nn.BatchNorm2d(features),
             activation,
             nn.Conv2d(features, features, kernel_size=3,
-                      stride=1, padding=1, bias=True, groups=1),
-            activation,
-            zero_module(
-                nn.Conv2d(features, features, kernel_size=3,
-                          stride=1, padding=1, bias=True, groups=1)
-            )
+                      stride=1, padding=1, bias=False, groups=1),
+            nn.BatchNorm2d(features),
+            activation #,
+            # zero_module(
+            #     nn.Conv2d(features, features, kernel_size=3,
+            #               stride=1, padding=1, bias=True, groups=1)
+            # )
         )
         self.skip_add = nn.quantized.FloatFunctional()
         self.size = size
@@ -440,7 +452,7 @@ class Dist(nn.Module):
         Valid = (S > 1e-3)          # (B, 1, N)
         xy = torch.stack((xx, yy), axis=0).reshape(1, 2, -1).float()    # (1, 2, n) 一行x，一行y 所有像素坐标
         idx = torch.arange(N, device=S.device).reshape(1, 1, N)         # (1, 1, n) 所有像素坐标排序
-        Ofnum, args = bpdist(xy, idx, Valid, num, height, width)
+        Ofnum, args = bpdist(xy, idx, Valid, num, height, width)    # (B, 2, 4, N) (B, 4, N)
         return Ofnum, args
 
 
@@ -521,7 +533,28 @@ class Prefill(nn.Module):
 
         B, _, height, width = Sp.shape
         xx, yy = torch.meshgrid(torch.arange(width, device=Sp.device), torch.arange(height, device=Sp.device), indexing='xy')   # xx是列坐标(向右为正)，yy是行坐标(向下为正)
-        Ofnum, args = self.dist(Sp, xx, yy)
+        Ofnum, args = self.dist(Sp, xx, yy) # (B, 2, 4, N) (B, 4, N)
         dout = self.prop(fi, Sp, Ofnum, args)
+
+        return dout
+
+class Prefill_nearest(nn.Module):
+    def __init__(self, num=4):
+        super().__init__()
+        self.num = num
+        self.dist = Dist(num=num)
+
+    def forward(self, Sp):
+        """
+        Sp:     (B, 1, 256, 1216)
+        """
+        B, _, height, width = Sp.shape
+        xx, yy = torch.meshgrid(torch.arange(width, device=Sp.device), torch.arange(height, device=Sp.device), indexing='xy')   # xx是列坐标(向右为正)，yy是行坐标(向下为正)
+        Ofnum, args = self.dist(Sp, xx, yy) # (B, 2, 4, N) (B, 4, N)
+
+        ss = Sp.view(B, 1, 1, -1).repeat(1, 1, self.num, 1)  # (B, 1, 1, N) --> (B, 1, 4, N)
+        dout = torch.gather(ss, dim=-1, index=args.view(B, 1, self.num, -1))   # (B, 1 ,4, N)
+        dout = torch.mean(dout, dim=-2) # (B, 1  N)
+        dout = dout.view(B, _ , height, width)
 
         return dout
