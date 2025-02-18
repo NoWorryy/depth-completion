@@ -107,7 +107,8 @@ class ScaleModel(nn.Module):
                 nn.Conv2d(head_features_2, 1, kernel_size=1,
                           stride=1, padding=0, bias=True),
                 # nn.BatchNorm2d(1),
-                act_func,
+                nn.ReLU(True),
+                act_func
             )
         
         if self.use_spn:

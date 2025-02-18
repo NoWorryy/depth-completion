@@ -300,17 +300,17 @@ class FeatureFusionDepthBlock(nn.Module):
         self.resConfUnit2 = ResidualConvUnit(features, activation, bn)
         self.resConfUnit_depth = nn.Sequential(
             nn.Conv2d(2, features, kernel_size=3, stride=1,
-                      padding=1, bias=False, groups=1),
-            nn.BatchNorm2d(features),
+                      padding=1, bias=True, groups=1),
+            # nn.BatchNorm2d(features),
             activation,
             nn.Conv2d(features, features, kernel_size=3,
-                      stride=1, padding=1, bias=False, groups=1),
-            nn.BatchNorm2d(features),
-            activation #,
-            # zero_module(
-            #     nn.Conv2d(features, features, kernel_size=3,
-            #               stride=1, padding=1, bias=True, groups=1)
-            # )
+                      stride=1, padding=1, bias=True, groups=1),
+            # nn.BatchNorm2d(features),
+            activation,
+            zero_module(
+                nn.Conv2d(features, features, kernel_size=3,
+                          stride=1, padding=1, bias=True, groups=1)
+            )
         )
         self.skip_add = nn.quantized.FloatFunctional()
         self.size = size

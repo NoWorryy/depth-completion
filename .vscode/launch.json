@@ -1,35 +1,35 @@
-{
-    "version": "0.2.0",
-    "configurations": [
-        
-        {
-            "name": "Python: Current File",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "src/test.py",
-            "console": "integratedTerminal",
-            "justMyCode": true,
-            "cwd": "/home/sbq/codes/depth-completion/",
-            "env": {"CUDA_VISIBLE_DEVICES": "0"}
-        }
-    ]
-}
-
 // {
 //     "version": "0.2.0",
 //     "configurations": [
         
 //         {
-//             "name": "Python: TorchRun",
+//             "name": "Python: Current File",
 //             "type": "debugpy",
 //             "request": "launch",
-//             // "program": "src/trainer.py",
-//             "module": "torch.distributed.run",
+//             "program": "src/test.py",
 //             "console": "integratedTerminal",
 //             "justMyCode": true,
 //             "cwd": "/home/sbq/codes/depth-completion/",
-//             "env": {"CUDA_VISIBLE_DEVICES": "1"},
-//             "args":["--nproc_per_node=1", "--nnodes=1", "src/trainer.py"]
+//             "env": {"CUDA_VISIBLE_DEVICES": "0"}
 //         }
 //     ]
 // }
+
+{
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "name": "Python: TorchRun",
+            "type": "debugpy",
+            "request": "launch",
+            // "program": "src/trainer.py",
+            "module": "torch.distributed.run",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "/home/sbq/codes/depth-completion/",
+            "env": {"CUDA_VISIBLE_DEVICES": "1"},
+            "args":["--nproc_per_node=1", "--nnodes=1", "src/trainer.py"]
+        }
+    ]
+}
