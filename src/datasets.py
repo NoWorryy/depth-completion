@@ -193,7 +193,7 @@ class KBNetInferenceDataset(torch.utils.data.Dataset):
             'image': self.transform(image),
             'sparse_depth': self.transform(sparse_depth),
             'intrinsics': intrinsics.astype(np.float32),
-            'ground_truth': self.transform(ground_truth),
+            'gt': self.transform(ground_truth),
         }
 
         return inputs

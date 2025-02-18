@@ -23,7 +23,7 @@ def write_loss(iteration, writer, losses_dict):
 
 
 def main(device: str,
-        
+        mode: str,
         dataset_train_params: dict,
         dataset_val_params: dict,
         model_params: dict,
@@ -60,6 +60,7 @@ def main(device: str,
 
 
     trainer = Train_net(device = device,
+                        mode=mode,
                         model_params = model_params,
                         train_params = train_params,
                         pretrained_weights = pretrained_weights)
@@ -150,7 +151,7 @@ def main(device: str,
                 if (iteration % train_params['n_img']) == 0:
 
                     # 保存图像 这里都是(b, c, h, w)
-                    img = inputs['image'][0].permute(1,2,0).detach().cpu().numpy()
+                    img = inputs['image'][0].permute(1,2,0).detach().cpu().numpy() * 255.0
 
                     sd = inputs['sparse_depth'][0].squeeze(0).detach().cpu().numpy()
                     sd = (sd - sd.min()) / (sd.max() - sd.min()) * 255.0
@@ -182,47 +183,6 @@ def main(device: str,
                             print(f"Gradient vanishing detected at layer {name}")
                         if grad_norm > 1e6:
                             print(f"Gradient explosion detected at layer {name}")
-
-            
-            # if trainer.accelerator.is_main_process and (iteration % train_params['n_test']) == 0:
-            #     mae, rmse, imae, irmse = [], [], [], []
-
-            #     for idx, inputs in enumerate(val_dataloader):
-            #         # inputs = {key: value.to(device) for key, value in inputs.items()}
-            #         metrics, generated_val = trainer.validate(inputs)
-            #         generated_val = {key: value.detach().cpu() for key, value in generated_val.items()}
-
-            #         mae.append(metrics['mae'])
-            #         rmse.append(metrics['rmse'])
-            #         imae.append(metrics['imae'])
-            #         irmse.append(metrics['irmse'])
-
-            #         if idx == 0 and trainer.accelerator.sync_gradients and trainer.accelerator.is_main_process:    # 保存第一个batch的图片
-            #             sparse_depth_color = colorize((inputs['sparse_depth'] / model_params['depth_model_params']['max_predict_depth']).cpu(), colormap='viridis')
-            #             output_depth_color = colorize((generated_val['output_depth'] / model_params['depth_model_params']['max_predict_depth']).cpu(), colormap='viridis')
-                        
-            #             gt_error_abs = torch.abs(generated_val['output_depth'] - inputs['ground_truth'])
-            #             gt_error_rel = torch.where(
-            #                 inputs['gt_mask'],
-            #                 (gt_error_abs + EPSILON) / (inputs['ground_truth'] + EPSILON),
-            #                 torch.zeros_like(gt_error_abs))
-                        
-            #             gt_error_color = colorize(gt_error_rel.cpu(), colormap='inferno')
-
-            #             val_data_pair = torch.cat([
-            #                 sparse_depth_color, inputs['image'], output_depth_color, gt_error_color],
-            #                 dim = 2)
-            #             torchvision.utils.save_image(val_data_pair[:5, ...], f"{output_dir}/output_image/{f'val_data_pair-{iteration}'}.png")
-            #             tb_writer.add_images("val_sparse_image_dense_error", val_data_pair[:5, ...], global_step=iteration)
-
-            #     mae   = np.mean(mae)
-            #     rmse  = np.mean(rmse)
-            #     imae  = np.mean(imae)
-            #     irmse = np.mean(irmse)
-                
-            #     log(f'epoch:{epoch} iter:{iteration} ====> mae:{mae:.3f} rmse:{rmse:.3f} imae:{imae:.3f} irmse:{irmse:.3f}', log_path)
-            
-            
             
         
         trainer.scheduler_epoch_step()
@@ -234,8 +194,7 @@ def main(device: str,
 if __name__ == '__main__':
 
     cfg_path = '/home/sbq/codes/depth-completion/configs/kitti_train.yaml'
-    # with open(cfg_path, 'r') as fp:
-    #     args = yaml.safe_load(fp)
+
 
     args = OmegaConf.load(cfg_path)
 
@@ -245,4 +204,4 @@ if __name__ == '__main__':
     else:
         device = 'cpu'
 
-    main(device, **args)
+    main(device, 'train', **args)

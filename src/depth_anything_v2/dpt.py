@@ -2,7 +2,7 @@ import cv2
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.transforms import Compose
+from torchvision.transforms import Compose, Normalize
 
 from .dinov2 import DINOv2
 from .util.blocks import FeatureFusionBlock, _make_scratch
@@ -173,7 +173,7 @@ class DepthAnythingV2(nn.Module):
         
         self.encoder = encoder
         self.pretrained = DINOv2(model_name=encoder)
-        
+        self.norm = Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         self.depth_head = DPTHead(self.pretrained.embed_dim, features, use_bn, out_channels=out_channels, use_clstoken=use_clstoken)
     
     def forward(self, x):
@@ -190,7 +190,8 @@ class DepthAnythingV2(nn.Module):
         # image, (h, w) = self.image2tensor(raw_image, input_size)
         raw_img_size = raw_image.shape[2:]
         image = self.resize_image(raw_image, input_size)
-
+        image = self.norm(image)
+        
         depth, features = self.forward(image)
         
         depth = F.interpolate(depth, raw_img_size, mode="bilinear", align_corners=True)

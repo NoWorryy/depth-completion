@@ -101,12 +101,12 @@ class ScaleModel(nn.Module):
 
             self.scratch.output_conv2 = nn.Sequential(
                 nn.Conv2d(head_features_1 // 2, head_features_2,
-                          kernel_size=3, stride=1, padding=1, bias=False),
-                nn.BatchNorm2d(head_features_2),
+                          kernel_size=3, stride=1, padding=1, bias=True),
+                # nn.BatchNorm2d(head_features_2),
                 nn.ReLU(True),
                 nn.Conv2d(head_features_2, 1, kernel_size=1,
-                          stride=1, padding=0, bias=False),
-                nn.BatchNorm2d(1),
+                          stride=1, padding=0, bias=True),
+                # nn.BatchNorm2d(1),
                 act_func,
             )
         

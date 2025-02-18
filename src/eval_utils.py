@@ -15,95 +15,77 @@ https://arxiv.org/pdf/2108.10531.pdf
 }
 '''
 import numpy as np
+import torch
 
+def evaluate(gt, pred, mode=None):
+    t_valid = 0.0001
 
-def root_mean_sq_err(src, tgt):
-    '''
-    Root mean squared error
+    pred = pred.detach()
+    gt = gt.detach()
 
-    Arg(s):
-        src : numpy[float32]
-            source array
-        tgt : numpy[float32]
-            target array
-    Returns:
-        float : root mean squared error
-    '''
+    pred_inv = 1.0 / (pred + 1e-8)
+    gt_inv = 1.0 / (gt + 1e-8)
 
-    return np.sqrt(np.mean((tgt - src) ** 2))
+    # For numerical stability
+    mask = gt > t_valid
+    num_valid = mask.sum()
 
-def mean_abs_err(src, tgt):
-    '''
-    Mean absolute error
+    pred = pred[mask] * 1000.0
+    gt = gt[mask] * 1000.0
 
-    Arg(s):
-        src : numpy[float32]
-            source array
-        tgt : numpy[float32]
-            target array
-    Returns:
-        float : mean absolute error
-    '''
+    pred_inv = pred_inv[mask] * 1000
+    gt_inv = gt_inv[mask] * 1000
 
-    return np.mean(np.abs(tgt - src))
+    pred_inv[pred <= t_valid*1000] = 0.0
+    gt_inv[gt <= t_valid*1000] = 0.0
 
-def inv_root_mean_sq_err(src, tgt):
-    '''
-    Inverse root mean squared error
+    # RMSE / MAE
+    diff = pred - gt
+    diff_abs = torch.abs(diff)
+    diff_sqr = torch.pow(diff, 2)
 
-    Arg(s):
-        src : numpy[float32]
-            source array
-        tgt : numpy[float32]
-            target array
-    Returns:
-        float : inverse root mean squared error
-    '''
+    rmse = diff_sqr.sum() / (num_valid + 1e-8)
+    rmse = torch.sqrt(rmse)
 
-    mask = tgt==0
-    tgt[mask] = 1e-6
+    mae = diff_abs.sum() / (num_valid + 1e-8)
 
-    mask_src = src==0
-    src[mask_src] = 1e-6
+    # iRMSE / iMAE
+    diff_inv = pred_inv - gt_inv
+    diff_inv_abs = torch.abs(diff_inv)
+    diff_inv_sqr = torch.pow(diff_inv, 2)
 
-    return np.sqrt(np.mean(((1.0 / tgt) - (1.0 / src)) ** 2))
+    irmse = diff_inv_sqr.sum() / (num_valid + 1e-8)
+    irmse = torch.sqrt(irmse)
 
-def inv_mean_abs_err(src, tgt):
-    '''
-    Inverse mean absolute error
+    imae = diff_inv_abs.sum() / (num_valid + 1e-8)
 
-    Arg(s):
-        src : numpy[float32]
-            source array
-        tgt : numpy[float32]
-            target array
-    Returns:
-        float : inverse mean absolute error
-    '''
+    # Rel
+    rel = diff_abs / (gt + 1e-8)
+    rel = rel.sum() / (num_valid + 1e-8)
 
-    mask = tgt==0
-    tgt[mask] = 1e-6
+    # delta
+    r1 = gt / (pred + 1e-8)
+    r2 = pred / (gt + 1e-8)
+    ratio = torch.max(r1, r2)
 
-    mask_src = src==0
-    src[mask_src] = 1e-6
+    del_1 = (ratio < 1.25).type_as(ratio)
+    del_2 = (ratio < 1.25**2).type_as(ratio)
+    del_3 = (ratio < 1.25**3).type_as(ratio)
+    del_102 = (ratio < 1.02).type_as(ratio)
+    del_105 = (ratio < 1.05).type_as(ratio)
+    del_110 = (ratio < 1.10).type_as(ratio)
 
-    return np.mean(np.abs((1.0 / tgt) - (1.0 / src)))
+    del_1 = del_1.sum() / (num_valid + 1e-8)
+    del_2 = del_2.sum() / (num_valid + 1e-8)
+    del_3 = del_3.sum() / (num_valid + 1e-8)
+    del_102 = del_102.sum() / (num_valid + 1e-8)
+    del_105 = del_105.sum() / (num_valid + 1e-8)
+    del_110 = del_110.sum() / (num_valid + 1e-8)
 
-def mean_abs_rel_err(src, tgt):
-    '''
-    Mean absolute relative error (normalize absolute error)
+    result = {'rmse': rmse, 'mae': mae, 'irmse': irmse, 'imae': imae,
+              'rel': rel, 'del_1': del_1, 'del_2':  del_2, 'del_3': del_3, 'del_102': del_102, 'del_105': del_105, 'del_110': del_110}
 
-    Arg(s):
-        src : numpy[float32]
-            source array
-        tgt : numpy[float32]
-            target array
+    # result = torch.unsqueeze(result, dim=0).detach()
+    result = {key: value.detach().cpu() for key, value in result.items()}
 
-    Returns:
-        float : mean absolute relative error between source and target
-    '''
-
-    mask = tgt==0
-    tgt[mask] = 1e-6
-
-    return np.mean(np.abs(src - tgt) / tgt)
+    return result

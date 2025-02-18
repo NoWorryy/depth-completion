@@ -19,7 +19,7 @@ class Train_net(torch.nn.Module):
     Merge all generator related updates into single model for better multi-gpu usage
     """
 
-    def __init__(self, device, model_params, train_params, pretrained_weights=None):
+    def __init__(self, device, mode, model_params, train_params, pretrained_weights=None):
         super(Train_net, self).__init__()
 
         self.model_params = model_params
@@ -31,15 +31,16 @@ class Train_net(torch.nn.Module):
         self.augmentation_probability = train_params['augmentation_probabilities'][0]
 
         # Initialize the Accelerator
-        logger.info('Initializing the Accelerator:')
-        self.accelerator = Accelerator(
-            # gradient_accumulation_steps=train_params['gradient_accumulation_steps'],
-            # mixed_precision=train_params['mixed_precision_training'],
-            # log_with='tensorboard',
-            # project_dir=os.environ['SUMMARY_DIR']
-        )
-        logger.info('The accelerator Initialized.')
-        self.device = self.accelerator.device
+        if mode == 'train':
+            logger.info('Initializing the Accelerator:')
+            self.accelerator = Accelerator(
+                # gradient_accumulation_steps=train_params['gradient_accumulation_steps'],
+                # mixed_precision=train_params['mixed_precision_training'],
+                # log_with='tensorboard',
+                # project_dir=os.environ['SUMMARY_DIR']
+            )
+            logger.info('The accelerator Initialized.')
+            self.device = self.accelerator.device
 
         # 模型初始化
         logger.info('Initializing models:')
@@ -58,7 +59,7 @@ class Train_net(torch.nn.Module):
                                       in_channels=scale_config['embed_dim'],
                                       features=scale_config['features'],
                                       out_channels=scale_config['out_channels'],
-                                      use_bn=True,
+                                      use_bn=False,
                                       use_clstoken=False,
                                       use_prefill=model_params['scale_model_params']['use_prefill'],
                                       output_act='sigmoid')
@@ -89,9 +90,9 @@ class Train_net(torch.nn.Module):
         logger.info('Ckpt loaded.')
 
         # self.train_transforms = Transforms(**train_params['aug_params'])
-
-        # self.scale_model = torch.nn.DataParallel(self.scale_model)
-        # self.depth_anything = torch.nn.DataParallel(self.depth_anything)
+        if mode == 'test':
+            self.scale_model = torch.nn.DataParallel(self.scale_model)
+            self.depth_anything = torch.nn.DataParallel(self.depth_anything)
 
 
     def forward(self, inputs):
@@ -119,26 +120,25 @@ class Train_net(torch.nn.Module):
         # 获取稀疏尺度
         rel_depth_invalid = (rel_depth == 0)
         rel_depth[rel_depth_invalid] = 1
-        
-        # rel_depth_invalid = (rel_depth < 0.02)
-        # rel_depth[rel_depth_invalid] = 0.02
-
-        # rel_depth_inv = torch.div(torch.ones_like(rel_depth), rel_depth)
-        # rel_depth_inv_norm = (rel_depth_inv - rel_depth_inv.min()) / (rel_depth_inv.max() - rel_depth_inv.min())
-        # rel_depth = rel_depth_inv_norm
-
         sparse_scale = torch.div(sparse_depth, rel_depth)
         sparse_scale[rel_depth_invalid] = 0
         rel_depth[rel_depth_invalid] = 0
 
+        # 获取置信度图
         confidence_map = torch.zeros_like(sparse_scale)
         mask = (sparse_scale != 0)
         confidence_map[mask] = 1.0
 
+        # 归一化尺度
+        B = sparse_scale.shape[0]
+        max_val = torch.quantile(
+            sparse_scale.reshape(B, -1), 1., dim=1, keepdim=True)[:, :, None, None]
+        sparse_scale = sparse_scale / max_val 
+
         patch_h = resize_h // 14
         patch_w = resize_w // 14   # (B, n, d)
         output_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
-        # output_scale = F.interpolate(output_scale[:, None], image.shape[2:], mode="bilinear", align_corners=True)     # (B, H, W)
+        output_scale = output_scale * max_val
 
         output_depth = torch.mul(output_scale, rel_depth)
         generated = {
@@ -220,19 +220,20 @@ class Train_net(torch.nn.Module):
     @torch.no_grad()
     def validate(self, inputs):
 
-        inputs = {key: value.to(self.device) for key, value in inputs.items()}
-        image, sparse_depth, ground_truth = \
-            inputs['image'], inputs['sparse_depth'], inputs['ground_truth']
-        
+        # Set models to test mode
         self.depth_anything.eval()
         self.depth_anything.requires_grad_(False)
+
         self.scale_model.eval()
         self.scale_model.requires_grad_(False)
-        
+
+
+        inputs = {key: value.to(self.device) for key, value in inputs.items()}
+        image, sparse_depth, gt = \
+            inputs['image'], inputs['sparse_depth'], inputs['gt']
         
         # 获取相对深度图和图像特征
         rel_depth, img_feat, (resize_h, resize_w) = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
-        rel_depth = (rel_depth - rel_depth.min()) / (rel_depth.max() - rel_depth.min())
 
         # 获取稀疏尺度
         rel_depth_invalid = (rel_depth == 0)
@@ -241,29 +242,40 @@ class Train_net(torch.nn.Module):
         sparse_scale[rel_depth_invalid] = 0
         rel_depth[rel_depth_invalid] = 0
 
+        # 获取置信度图
         confidence_map = torch.zeros_like(sparse_scale)
         mask = (sparse_scale != 0)
         confidence_map[mask] = 1.0
 
+        # 归一化尺度
+        B = sparse_scale.shape[0]
+        max_val = torch.quantile(
+            sparse_scale.reshape(B, -1), 1., dim=1, keepdim=True)[:, :, None, None]
+        sparse_scale = sparse_scale / max_val 
+        
         patch_h = resize_h // 14
         patch_w = resize_w // 14   # (B, n, d)
         output_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
-  
+        output_scale = output_scale * max_val
+        
         output_depth = torch.mul(output_scale, rel_depth)
         generated = {
+            'rel_depth': rel_depth,
             'output_scale': output_scale, 
             'output_depth': output_depth
         }
-
-        output_depth = output_depth.cpu().numpy()
-        ground_truth = ground_truth.cpu().numpy()
+        
+        # output_depth = output_depth.cpu().numpy()
+        # gt = gt.cpu().numpy()
 
         # Compute validation metrics
-        metrics = {}
-        metrics['mae'] = eval_utils.mean_abs_err(1000.0 * output_depth, 1000.0 * ground_truth)
-        metrics['rmse'] = eval_utils.root_mean_sq_err(1000.0 * output_depth, 1000.0 * ground_truth)
-        metrics['imae'] = eval_utils.inv_mean_abs_err(0.001 * output_depth, 0.001 * ground_truth)
-        metrics['irmse'] = eval_utils.inv_root_mean_sq_err(0.001 * output_depth, 0.001 * ground_truth)
+        # metrics = {}
+        # metrics['mae'] = eval_utils.mean_abs_err(1000.0 * output_depth, 1000.0 * gt)
+        # metrics['rmse'] = eval_utils.root_mean_sq_err(1000.0 * output_depth, 1000.0 * gt)
+        # metrics['imae'] = eval_utils.inv_mean_abs_err(0.001 * output_depth, 0.001 * gt)
+        # metrics['irmse'] = eval_utils.inv_root_mean_sq_err(0.001 * output_depth, 0.001 * gt)
+
+        metrics = eval_utils.evaluate(gt=gt, pred=output_depth)
 
         return metrics, generated
 
@@ -328,3 +340,20 @@ class Train_net(torch.nn.Module):
         checkpoint_path = os.path.join(checkpoint_dir, f'ckpt_iter_{iteration}.pth')
         torch.save(ckpt, checkpoint_path)
         logger.info(f'Checkpoint saved at {checkpoint_path}')
+    
+    def normalize(self,
+                sparse_scale: torch.Tensor):
+        B, C, H, W = sparse_scale.shape
+        min_val = torch.quantile(
+            sparse_scale.reshape(B, -1), 0., dim=1, keepdim=True)[:, :, None, None]
+        max_val = torch.quantile(
+            sparse_scale.reshape(B, -1), 1., dim=1, keepdim=True)[:, :, None, None]
+        # sparse_scale = (sparse_scale - min_val) / (max_val - min_val)
+        sparse_scale = sparse_scale / max_val   
+        return sparse_scale, min_val, max_val
+
+    def denormalize(self,
+                    scale: torch.Tensor,
+                    min_val: torch.Tensor,
+                    max_val: torch.Tensor):
+        return scale * (max_val - min_val) + min_val
