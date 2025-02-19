@@ -68,23 +68,23 @@ def main(device: str,
         sd = (sd - sd.min()) / (sd.max() - sd.min()) * 255.0
         sd = (cmap(sd.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
-        rel_depth = generated['rel_depth'][0].squeeze(0).detach().cpu().numpy()
-        rel_depth = (rel_depth - rel_depth.min()) / (rel_depth.max() - rel_depth.min()) * 255.0
-        rel_depth = (cmap(rel_depth.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+        # rel_depth = generated['rel_depth'][0].squeeze(0).detach().cpu().numpy()
+        # rel_depth = (rel_depth - rel_depth.min()) / (rel_depth.max() - rel_depth.min()) * 255.0
+        # rel_depth = (cmap(rel_depth.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
         output_depth = generated['output_depth'][0].squeeze(0).detach().cpu().numpy()
         output_depth = (output_depth - output_depth.min()) / (output_depth.max() - output_depth.min()) * 255.0
         output_depth = (cmap(output_depth.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
-        output_scale = generated['output_scale'][0].squeeze(0).detach().cpu().numpy()
-        output_scale = (output_scale - output_scale.min()) / (output_scale.max() - output_scale.min()) * 255.0
-        output_scale = (cmap(output_scale.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+        # output_scale = generated['output_scale'][0].squeeze(0).detach().cpu().numpy()
+        # output_scale = (output_scale - output_scale.min()) / (output_scale.max() - output_scale.min()) * 255.0
+        # output_scale = (cmap(output_scale.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
         gt = inputs['gt'][0].squeeze(0).detach().cpu().numpy()
         gt = (gt - gt.min()) / (gt.max() - gt.min()) * 255.0
         gt = (cmap(gt.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
-        test_data_pair = np.concatenate((img, sd, rel_depth, output_scale, output_depth, gt), axis=0)
+        test_data_pair = np.concatenate((img, sd, output_depth, gt), axis=0)
         cv2.imwrite(f"{output_dir}/{f'test_img_sd_output_gt-{idx}'}.png", test_data_pair)
 
 

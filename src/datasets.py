@@ -6,6 +6,7 @@ import json
 import random
 import numpy as np
 from torchvision import transforms
+import depth_map_utils
 
 
 def random_crop(inputs, shape, intrinsics=None, RandCrop = False, tp_min=50):
@@ -102,8 +103,14 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
 
                 # Load depth
                 z = np.array(Image.open(entry['sparse_depth']), dtype=np.float32) / 256.0   # Assert 16-bit (not 8-bit) depth map
+                
+                prefill_depth = depth_map_utils.fill_in_fast(
+                    z, extrapolate=True, blur_type='gaussian')
+
                 z[z <= 0] = 0.0
+                prefill_depth[prefill_depth <=0] = 0.0
                 sparse_depth = np.expand_dims(z, axis=-1)  # (h,w,c)
+                prefill_depth = np.expand_dims(prefill_depth, axis=-1)  # (h,w,c)
 
                 # Load gt
                 gt = np.array(Image.open(entry['gt']), dtype=np.float32) / 256.0   # Assert 16-bit (not 8-bit) depth map
@@ -115,8 +122,8 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
                 # intrinsics = np.load(entry['intrinsic']).astype(np.float32)
 
                 # Crop image, depth and adjust intrinsics
-                [image, sparse_depth, gt] = random_crop(
-                    inputs=[image, sparse_depth, gt],
+                [image, sparse_depth, prefill_depth, gt] = random_crop(
+                    inputs=[image, sparse_depth, prefill_depth, gt],
                     shape=self.shape,
                     intrinsics=intrinsics,
                     RandCrop=self.RandCrop)
@@ -124,6 +131,7 @@ class KBNetTrainingDataset(torch.utils.data.Dataset):
                 inputs = {
                     'image': self.transform(image),   # 0~1 （）
                     'sparse_depth': self.transform(sparse_depth), # 真实值
+                    'prefill_depth': self.transform(prefill_depth),
                     # 'intrinsics': intrinsics.astype(np.float32),
                     'gt': self.transform(gt)
                 }
@@ -177,8 +185,15 @@ class KBNetInferenceDataset(torch.utils.data.Dataset):
 
         # Load depth
         z = np.array(Image.open(entry['sparse_depth']), dtype=np.float32) / 256.0   # Assert 16-bit (not 8-bit) depth map
+        
+        prefill_depth = depth_map_utils.fill_in_fast(
+                    z, extrapolate=True, blur_type='gaussian')
+
         z[z <= 0] = 0.0
+        prefill_depth[prefill_depth <=0] = 0.0
         sparse_depth = np.expand_dims(z, axis=-1)  # (h,w,c)
+        prefill_depth = np.expand_dims(prefill_depth, axis=-1)  # (h,w,c)
+
 
         # Load camera intrinsics
         intrinsics = np.reshape(np.loadtxt(entry['intrinsic']), (3, 3))
@@ -192,6 +207,7 @@ class KBNetInferenceDataset(torch.utils.data.Dataset):
         inputs = {
             'image': self.transform(image),
             'sparse_depth': self.transform(sparse_depth),
+            'prefill_depth': self.transform(prefill_depth),
             'intrinsics': intrinsics.astype(np.float32),
             'gt': self.transform(ground_truth),
         }

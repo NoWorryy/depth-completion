@@ -124,8 +124,8 @@ class ScaleModel(nn.Module):
             self.prefill = Prefill_nearest(num=4)
 
 
-    def forward(self, out_features, patch_h, patch_w, sparse_scale=None, certainty=None, img_size=(256, 1216)):
-        out0 = []
+    def forward(self, out_features, patch_h, patch_w, sparse_depth=None, prefill_depth=None, certainty=None, img_size=(256, 1216)):
+        # out0 = []
         out = []
         for i, x in enumerate(out_features):
             if self.use_clstoken:
@@ -149,30 +149,30 @@ class ScaleModel(nn.Module):
         layer_1, layer_2, layer_3, layer_4 = out    # (1, ci, hi, wi)
         
         if self.use_prefill:
-            # mid_scale1 = self.prefill1(sparse_scale, layer1)
-            # mid_scale2 = self.prefill2(sparse_scale, layer2)
-            # mid_scale3 = self.prefill3(sparse_scale, layer3)
-            # mid_scale4 = self.prefill4(sparse_scale, layer4)
+            # prefill_depth1 = self.prefill1(sparse_depth, layer1)
+            # prefill_depth2 = self.prefill2(sparse_depth, layer2)
+            # prefill_depth3 = self.prefill3(sparse_depth, layer3)
+            # prefill_depth4 = self.prefill4(sparse_depth, layer4)
 
-            mid_scale = self.prefill(sparse_scale)
+            prefill_depth = self.prefill(sparse_depth)
         
         if certainty is not None:
-            # mid_scale1 = torch.cat((mid_scale1, certainty), 1)  # (B, 2, H0, W0)
-            # mid_scale2 = torch.cat((mid_scale2, certainty), 1)  # (B, 2, H0, W0)
-            # mid_scale3 = torch.cat((mid_scale3, certainty), 1)  # (B, 2, H0, W0)
-            # mid_scale4 = torch.cat((mid_scale4, certainty), 1)  # (B, 2, H0, W0)
+            # prefill_depth1 = torch.cat((prefill_depth1, certainty), 1)  # (B, 2, H0, W0)
+            # prefill_depth2 = torch.cat((prefill_depth2, certainty), 1)  # (B, 2, H0, W0)
+            # prefill_depth3 = torch.cat((prefill_depth3, certainty), 1)  # (B, 2, H0, W0)
+            # prefill_depth4 = torch.cat((prefill_depth4, certainty), 1)  # (B, 2, H0, W0)
             
-            mid_scale = torch.cat((mid_scale, certainty), 1)  # (B, 2, H0, W0)
+            prefill_depth = torch.cat((prefill_depth, certainty), 1)  # (B, 2, H0, W0)
 
         layer_1_rn = self.scratch.layer1_rn(layer_1)    # 都把通道数转化成指定值 feature：128
         layer_2_rn = self.scratch.layer2_rn(layer_2)
         layer_3_rn = self.scratch.layer3_rn(layer_3)
         layer_4_rn = self.scratch.layer4_rn(layer_4)
 
-        path_4 = self.scratch.refinenet4(layer_4_rn, size=layer_3_rn.shape[2:], prompt_depth=mid_scale)          # (B, 128, H3, W3)
-        path_3 = self.scratch.refinenet3(path_4, layer_3_rn, size=layer_2_rn.shape[2:], prompt_depth=mid_scale)  # (B, 128, H2, W2)
-        path_2 = self.scratch.refinenet2(path_3, layer_2_rn, size=layer_1_rn.shape[2:], prompt_depth=mid_scale)  # (B, 128, H1, W1)
-        path_1 = self.scratch.refinenet1(path_2, layer_1_rn, prompt_depth=mid_scale)     # (B, 128, 2H1, 2W1)
+        path_4 = self.scratch.refinenet4(layer_4_rn, size=layer_3_rn.shape[2:], prompt_depth=prefill_depth)          # (B, 128, H3, W3)
+        path_3 = self.scratch.refinenet3(path_4, layer_3_rn, size=layer_2_rn.shape[2:], prompt_depth=prefill_depth)  # (B, 128, H2, W2)
+        path_2 = self.scratch.refinenet2(path_3, layer_2_rn, size=layer_1_rn.shape[2:], prompt_depth=prefill_depth)  # (B, 128, H1, W1)
+        path_1 = self.scratch.refinenet1(path_2, layer_1_rn, prompt_depth=prefill_depth)     # (B, 128, 2H1, 2W1)
         
 
         out = self.scratch.output_conv1(path_1)     # (B, 64, 2H1, 2W1)

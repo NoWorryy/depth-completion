@@ -110,23 +110,23 @@ class Train_net(torch.nn.Module):
 
 
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
-        image, sparse_depth, gt = \
-            inputs['image'], inputs['sparse_depth'], inputs['gt']
+        image, sparse_depth, gt, prefill_depth = \
+            inputs['image'], inputs['sparse_depth'], inputs['gt'], inputs['prefill_depth']
         
         # 获取相对深度图和图像特征
         rel_depth, img_feat, (resize_h, resize_w) = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
         # rel_depth = (rel_depth - rel_depth.min()) / (rel_depth.max() - rel_depth.min())
 
         # 获取稀疏尺度
-        rel_depth_invalid = (rel_depth == 0)
-        rel_depth[rel_depth_invalid] = 1
-        sparse_scale = torch.div(sparse_depth, rel_depth)
-        sparse_scale[rel_depth_invalid] = 0
-        rel_depth[rel_depth_invalid] = 0
+        # rel_depth_invalid = (rel_depth == 0)
+        # rel_depth[rel_depth_invalid] = 1
+        # sparse_scale = torch.div(sparse_depth, rel_depth)
+        # sparse_scale[rel_depth_invalid] = 0
+        # rel_depth[rel_depth_invalid] = 0
 
         # 获取置信度图
-        confidence_map = torch.zeros_like(sparse_scale)
-        mask = (sparse_scale > 0.0001)
+        confidence_map = torch.zeros_like(sparse_depth)
+        mask = (sparse_depth > 0.0001)
         confidence_map[mask] = 1.0
 
         # 归一化尺度
@@ -137,18 +137,21 @@ class Train_net(torch.nn.Module):
 
         patch_h = resize_h // 14
         patch_w = resize_w // 14   # (B, n, d)
-        output_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
+        # output_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
         # output_scale = output_scale * max_val
 
-        output_depth = torch.mul(output_scale, rel_depth)
+        # 直接回归depth
+        output_depth = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_depth, prefill_depth, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
+
+        # output_depth = torch.mul(output_scale, rel_depth)
         generated = {
-            'rel_depth': rel_depth,
-            'output_scale': output_scale, 
+            # 'rel_depth': rel_depth,
+            # 'output_scale': output_scale, 
             'output_depth': output_depth
         }
 
         # Compute loss function 
-        loss, loss_info = self.compute_loss(output_depth, gt, rel_depth, self.train_params['loss_weights'])
+        loss, loss_info = self.compute_loss(output_depth, gt, self.train_params['loss_weights'])
         
         # loss.backward()
         self.accelerator.backward(loss)
@@ -181,37 +184,37 @@ class Train_net(torch.nn.Module):
         return grad_x, grad_y
 
 
-    def compute_loss(self, output_depth, gt, rel_depth, loss_weights):
+    def compute_loss(self, output_depth, gt, loss_weights):
         # loss_gt
         # gt_mask = (gt > 1e-3)
         # valid_points = gt_mask.sum()
         # loss_gt = torch.sum(torch.abs(output_depth - gt ) * gt_mask) / (valid_points + 1e-6)
 
-        loss_gt = losses.l1loss(pred=output_depth, gt=gt, max_depth=90)
-
+        loss_l1 = losses.l1loss(pred=output_depth, gt=gt, max_depth=90)
+        loss_l2 = losses.l2loss(pred=output_depth, gt=gt, max_depth=90)
         # loss_e
-        output_depth_norm = torch.zeros_like(output_depth)
-        for i, od in enumerate(output_depth):
-            output_depth_norm[i] = (od - od.min()) / (od.max() - od.min())
-        grad_x_gen, grad_y_gen = self.compute_gradients(output_depth_norm)
+        # output_depth_norm = torch.zeros_like(output_depth)
+        # for i, od in enumerate(output_depth):
+        #     output_depth_norm[i] = (od - od.min()) / (od.max() - od.min())
+        # grad_x_gen, grad_y_gen = self.compute_gradients(output_depth_norm)
 
-        rel_depth_norm = torch.zeros_like(rel_depth)
-        for i, rd in enumerate(rel_depth):
-            rel_depth_norm[i] = (rd - rd.min()) / (rd.max() - rd.min())
-        grad_x_target, grad_y_target = self.compute_gradients(rel_depth_norm)
+        # rel_depth_norm = torch.zeros_like(rel_depth)
+        # for i, rd in enumerate(rel_depth):
+        #     rel_depth_norm[i] = (rd - rd.min()) / (rd.max() - rd.min())
+        # grad_x_target, grad_y_target = self.compute_gradients(rel_depth_norm)
 
-        loss_x = torch.abs(grad_x_gen - grad_x_target)
-        loss_y = torch.abs(grad_y_gen - grad_y_target)
+        # loss_x = torch.abs(grad_x_gen - grad_x_target)
+        # loss_y = torch.abs(grad_y_gen - grad_y_target)
 
-        loss_e = loss_x.mean() + loss_y.mean()
+        # loss_e = loss_x.mean() + loss_y.mean()
 
         # l = w_{ph}l_{ph} + w_{sz}l_{sz} + w_{sm}l_{sm}
-        loss = loss_weights['w_gt'] * loss_gt + loss_weights['w_e'] * loss_e
+        loss = loss_weights['w_l1'] * loss_l1 + loss_weights['w_l2'] * loss_l2
 
         loss_info = {
             'loss': loss,
-            'loss_gt': loss_gt,
-            'loss_e': loss_e
+            'loss_l1': loss_l1,
+            'loss_l2': loss_l2
         }
 
         return loss, loss_info
@@ -229,22 +232,22 @@ class Train_net(torch.nn.Module):
 
 
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
-        image, sparse_depth, gt = \
-            inputs['image'], inputs['sparse_depth'], inputs['gt']
+        image, sparse_depth, gt, prefill_depth = \
+            inputs['image'], inputs['sparse_depth'], inputs['gt'], inputs['prefill_depth']
         
         # 获取相对深度图和图像特征
         rel_depth, img_feat, (resize_h, resize_w) = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
 
         # 获取稀疏尺度
-        rel_depth_invalid = (rel_depth == 0)
-        rel_depth[rel_depth_invalid] = 1
-        sparse_scale = torch.div(sparse_depth, rel_depth)
-        sparse_scale[rel_depth_invalid] = 0
-        rel_depth[rel_depth_invalid] = 0
+        # rel_depth_invalid = (rel_depth == 0)
+        # rel_depth[rel_depth_invalid] = 1
+        # sparse_scale = torch.div(sparse_depth, rel_depth)
+        # sparse_scale[rel_depth_invalid] = 0
+        # rel_depth[rel_depth_invalid] = 0
 
         # 获取置信度图
-        confidence_map = torch.zeros_like(sparse_scale)
-        mask = (sparse_scale != 0)
+        confidence_map = torch.zeros_like(sparse_depth)
+        mask = (sparse_depth > 0.0001)
         confidence_map[mask] = 1.0
 
         # 归一化尺度
@@ -255,13 +258,13 @@ class Train_net(torch.nn.Module):
         
         patch_h = resize_h // 14
         patch_w = resize_w // 14   # (B, n, d)
-        output_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
+        output_depth = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_depth, prefill_depth, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
         # output_scale = output_scale * max_val
         
-        output_depth = torch.mul(output_scale, rel_depth)
+        # output_depth = torch.mul(output_scale, rel_depth)
         generated = {
-            'rel_depth': rel_depth,
-            'output_scale': output_scale, 
+            # 'rel_depth': rel_depth,
+            # 'output_scale': output_scale, 
             'output_depth': output_depth
         }
         
