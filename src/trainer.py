@@ -82,7 +82,8 @@ def main(device: str,
 
     # training
     train_data_length = len(dataloader)     # 72400 --> 3017
-    start_epoch = trainer.iter // train_data_length
+    train_data_length_bs7 = 85898 // 21 + 1
+    start_epoch = trainer.iter // train_data_length_bs7
     max_epoch = train_params['learning_schedule'][-1]
     max_train_steps = max_epoch * train_data_length
     iteration = trainer.iter

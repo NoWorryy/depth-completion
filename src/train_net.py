@@ -248,15 +248,15 @@ class Train_net(torch.nn.Module):
         confidence_map[mask] = 1.0
 
         # 归一化尺度
-        B = sparse_scale.shape[0]
-        max_val = torch.quantile(
-            sparse_scale.reshape(B, -1), 1., dim=1, keepdim=True)[:, :, None, None]
-        sparse_scale = sparse_scale / max_val 
+        # B = sparse_scale.shape[0]
+        # max_val = torch.quantile(
+        #     sparse_scale.reshape(B, -1), 1., dim=1, keepdim=True)[:, :, None, None]
+        # sparse_scale = sparse_scale / max_val 
         
         patch_h = resize_h // 14
         patch_w = resize_w // 14   # (B, n, d)
         output_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
-        output_scale = output_scale * max_val
+        # output_scale = output_scale * max_val
         
         output_depth = torch.mul(output_scale, rel_depth)
         generated = {

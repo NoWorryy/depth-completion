@@ -16,6 +16,7 @@ https://arxiv.org/pdf/2108.10531.pdf
 '''
 import numpy as np
 import torch
+from PIL import Image
 
 def evaluate(gt, pred, mode=None):
     t_valid = 0.0001
@@ -89,3 +90,83 @@ def evaluate(gt, pred, mode=None):
     result = {key: value.detach().cpu() for key, value in result.items()}
 
     return result
+
+import os
+
+def evaluate_onimg(gt_dir, pred_dir, mode=None):
+
+    # Load gt
+    mae_ = []
+    rmse_ = []
+    imae_ = []
+    irmse_ = []
+
+    gt_list = sorted(os.listdir(gt_dir))
+    for gt_name in gt_list:
+        gt = os.path.join(gt_dir, gt_name)
+        gt = np.array(Image.open(gt), dtype=np.float32) / 256.0   # Assert 16-bit (not 8-bit) depth map
+        gt[gt <= 0] = 0.0
+
+        pred_name = os.path.join(pred_dir, gt_name).replace('groundtruth_depth', 'velodyne_raw') #2011_10_03_drive_0047_sync_velodyne_raw_0000000791_image_03
+        pred = np.array(Image.open(pred_name), dtype=np.float32) / 256.0   # Assert 16-bit (not 8-bit) depth map
+        pred[pred <= 0] = 0.0
+
+
+        t_valid = 0.0001
+
+        pred_inv = 1.0 / (pred + 1e-8)
+        gt_inv = 1.0 / (gt + 1e-8)
+
+        # For numerical stability
+        mask = gt > t_valid
+        num_valid = mask.sum()
+
+        pred = pred[mask] * 1000.0
+        gt = gt[mask] * 1000.0
+
+        pred_inv = pred_inv[mask] * 1000
+        gt_inv = gt_inv[mask] * 1000
+
+        pred_inv[pred <= t_valid*1000] = 0.0
+        gt_inv[gt <= t_valid*1000] = 0.0
+
+        # RMSE / MAE
+        diff = pred - gt
+        diff_abs = np.abs(diff)
+        
+        diff_sqr = np.power(diff, 2)
+
+        rmse = diff_sqr.sum() / (num_valid + 1e-8)
+        rmse = np.sqrt(rmse)
+
+        mae = diff_abs.sum() / (num_valid + 1e-8)
+
+        # iRMSE / iMAE
+        diff_inv = pred_inv - gt_inv
+        diff_inv_abs = np.abs(diff_inv)
+        diff_inv_sqr = np.power(diff_inv, 2)
+
+        irmse = diff_inv_sqr.sum() / (num_valid + 1e-8)
+        irmse = np.sqrt(irmse)
+
+        imae = diff_inv_abs.sum() / (num_valid + 1e-8)
+
+        mae_.append(mae)
+        rmse_.append(rmse)
+        imae_.append(imae)
+        irmse_.append(irmse)
+
+
+    mae = np.mean(mae_)
+    rmse = np.mean(rmse_)
+    imae = np.mean(imae_)
+    irmse = np.mean(irmse_)
+
+    print(mae, rmse, imae, irmse)
+
+    return
+
+if __name__ == '__main__':
+    gt_dir = '/home/sbq/codes/depth-completion/kitti_depth/data_depth_selection/val_selection_cropped/groundtruth_depth'
+    pred_dir = '/home/sbq/codes/ip_basic/demos/outputs/depth_val_000'
+    evaluate_onimg(gt_dir=gt_dir, pred_dir=pred_dir)
