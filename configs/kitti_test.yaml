@@ -74,5 +74,5 @@ dataset_val_params:
 
 
 pretrained_weights:
-  model_path: '/home/sbq/codes/depth-completion/ckpt/kitti/2025-02-19T17-05-42/checkpoints/ckpt_iter_1000.pth'
+  model_path: '/home/sbq/codes/depth-completion/ckpt/kitti/2025-02-20T18-06-23/checkpoints/ckpt_iter_5000.pth'
   depth_anything_ckpt: '/home/sbq/codes/Depth-Anything-V2/metric_depth/ckpt/depth_anything_v2_metric_vkitti_vitb.pth'

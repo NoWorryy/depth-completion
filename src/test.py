@@ -72,7 +72,7 @@ def main(device: str,
         # rel_depth = (rel_depth - rel_depth.min()) / (rel_depth.max() - rel_depth.min()) * 255.0
         # rel_depth = (cmap(rel_depth.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
-        output_depth = generated['output_depth'][0].squeeze(0).detach().cpu().numpy()
+        output_depth = generated['output_depth3'][0].squeeze(0).detach().cpu().numpy()
         output_depth = (output_depth - output_depth.min()) / (output_depth.max() - output_depth.min()) * 255.0
         output_depth = (cmap(output_depth.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
