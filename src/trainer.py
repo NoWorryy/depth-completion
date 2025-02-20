@@ -68,7 +68,12 @@ def main(device: str,
     # trainer = torch.nn.DataParallel(trainer)
     trainer.depth_anything, trainer.scale_model, trainer.optimizer_scale_model, dataloader, val_dataloader = trainer.accelerator.prepare(
         trainer.depth_anything, trainer.scale_model, trainer.optimizer_scale_model, dataloader, val_dataloader)
-    # trainer.accelerator.register_for_checkpointing(trainer.scheduler_scale_model)
+    
+    # from torch.nn.parallel import DistributedDataParallel as DDP
+
+    # # 使用 `find_unused_parameters=True` 启用未使用参数检查
+    # trainer.scale_model = DDP(trainer.scale_model, find_unused_parameters=True)
+
 
     if torch.cuda.device_count() > 1:
         trainer.depth_anything = torch.nn.SyncBatchNorm.convert_sync_batchnorm(trainer.depth_anything)
@@ -121,12 +126,14 @@ def main(device: str,
             
             if trainer.accelerator.is_main_process and first_epoch and step < 10:
                 first_epoch = False
-                for idx, (image, sparse_depth, prefill_depth, gt) in \
-                    enumerate(zip(inputs['image'], inputs['sparse_depth'], inputs['prefill_depth'], inputs['gt'])):
+                for idx, (image, sparse_depth, d_clear, prefill_depth, gt) in \
+                    enumerate(zip(inputs['image'], inputs['sparse_depth'], inputs['d_clear'], inputs['prefill_depth'], inputs['gt'])):
                     # concat source and driving image
                     sparse_depth = (sparse_depth - sparse_depth.min()) / (sparse_depth.max() - sparse_depth.min())
+                    d_clear = (d_clear - d_clear.min()) / (d_clear.max() - d_clear.min())
                     gt = (gt - gt.min()) / (gt.max() - gt.min())
-                    train_data_pair = torch.cat([image, sparse_depth.repeat(3,1,1), gt.repeat(3,1,1)], dim=1)
+                    prefill_depth = (prefill_depth - prefill_depth.min()) / (prefill_depth.max() - prefill_depth.min())
+                    train_data_pair = torch.cat([image, sparse_depth.repeat(3,1,1), d_clear.repeat(3,1,1), prefill_depth.repeat(3,1,1), gt.repeat(3,1,1)], dim=1)
                     torchvision.utils.save_image(train_data_pair, f"{output_dir}/input_image/{f'train_data_pair-step{step}-{idx}'}.png")
                     
             loss_info, generated = trainer(inputs)
@@ -158,13 +165,25 @@ def main(device: str,
                     sd = (sd - sd.min()) / (sd.max() - sd.min()) * 255.0
                     sd = (cmap(sd.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
-                    # rel_depth = generated['rel_depth'][0].squeeze(0).detach().cpu().numpy()
-                    # rel_depth = (rel_depth - rel_depth.min()) / (rel_depth.max() - rel_depth.min()) * 255.0
-                    # rel_depth = (cmap(rel_depth.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+                    prefill = generated['prefill_depth'][0].squeeze(0).detach().cpu().numpy()
+                    prefill = (prefill - prefill.min()) / (prefill.max() - prefill.min()) * 255.0
+                    prefill = (cmap(prefill.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
-                    output_depth = generated['output_depth'][0].squeeze(0).detach().cpu().numpy()
-                    output_depth = (output_depth - output_depth.min()) / (output_depth.max() - output_depth.min()) * 255.0
-                    output_depth = (cmap(output_depth.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+                    output_depth1 = generated['output_depth0'][0].squeeze(0).detach().cpu().numpy()
+                    output_depth1 = (output_depth1 - output_depth1.min()) / (output_depth1.max() - output_depth1.min()) * 255.0
+                    output_depth1 = (cmap(output_depth1.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+
+                    output_depth2 = generated['output_depth1'][0].squeeze(0).detach().cpu().numpy()
+                    output_depth2 = (output_depth2 - output_depth2.min()) / (output_depth2.max() - output_depth2.min()) * 255.0
+                    output_depth2 = (cmap(output_depth2.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+
+                    output_depth3 = generated['output_depth2'][0].squeeze(0).detach().cpu().numpy()
+                    output_depth3 = (output_depth3 - output_depth3.min()) / (output_depth3.max() - output_depth3.min()) * 255.0
+                    output_depth3 = (cmap(output_depth3.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
+
+                    output_depth4 = generated['output_depth3'][0].squeeze(0).detach().cpu().numpy()
+                    output_depth4 = (output_depth4 - output_depth4.min()) / (output_depth4.max() - output_depth4.min()) * 255.0
+                    output_depth4 = (cmap(output_depth4.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
                     # output_scale = generated['output_scale'][0].squeeze(0).detach().cpu().numpy()
                     # output_scale = (output_scale - output_scale.min()) / (output_scale.max() - output_scale.min()) * 255.0
@@ -174,7 +193,7 @@ def main(device: str,
                     gt = (gt - gt.min()) / (gt.max() - gt.min()) * 255.0
                     gt = (cmap(gt.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
-                    train_data_pair = np.concatenate((img, sd, output_depth, gt), axis=0)
+                    train_data_pair = np.concatenate((img, sd, prefill, output_depth1, output_depth2, output_depth3, output_depth4, gt), axis=0)
                     cv2.imwrite(f"{output_dir}/output_image/{f'train_img_sd_gt-{iteration}'}.png", train_data_pair)
                 
                 for name, param in trainer.named_parameters():

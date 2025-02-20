@@ -53,11 +53,11 @@ def _make_fusion_block(features, use_bn, size=None, use_res1=True):
 def _make_scratch(in_shape, out_shape, groups=1, expand=False):
     scratch = nn.Module()
 
-    out_shape1 = out_shape
-    out_shape2 = out_shape
-    out_shape3 = out_shape
+    out_shape1 = out_shape[0]
+    out_shape2 = out_shape[1]
+    out_shape3 = out_shape[2]
     if len(in_shape) >= 4:
-        out_shape4 = out_shape
+        out_shape4 = out_shape[3]
 
     if expand:
         out_shape1 = out_shape

@@ -239,3 +239,37 @@ def l2loss(pred, gt, max_depth):
     loss = loss.mean()
 
     return loss
+
+def l1_multiscale(preds, target):
+    gamma = 0.8
+    n_predictions = len(preds)
+    valid_mask = (target > 0).detach()
+    loss = 0.0
+
+    for i in range(n_predictions):
+        i_weight = gamma ** (n_predictions - i - 1)
+
+        diff = target - preds[i]
+        diff = diff[valid_mask]
+        i_loss = diff.abs().mean()
+
+        loss = loss + i_weight * i_loss
+
+    return loss
+
+def l2_multiscale(preds, target):
+    gamma = 0.8
+    n_predictions = len(preds)
+    valid_mask = (target > 0).detach()
+    loss = 0.0
+
+    for i in range(n_predictions):
+        i_weight = gamma ** (n_predictions - i - 1)
+
+        diff = target - preds[i]
+        diff = diff[valid_mask]
+        i_loss = (diff**2).mean()
+
+        loss = loss + i_weight * i_loss
+
+    return loss

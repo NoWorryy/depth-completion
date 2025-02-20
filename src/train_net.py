@@ -110,44 +110,24 @@ class Train_net(torch.nn.Module):
 
 
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
-        image, sparse_depth, gt, prefill_depth = \
-            inputs['image'], inputs['sparse_depth'], inputs['gt'], inputs['prefill_depth']
+        image, sparse_depth, gt, prefill_depth, d_clear = \
+            inputs['image'], inputs['sparse_depth'], inputs['gt'], inputs['prefill_depth'], inputs['d_clear']
         
-        # 获取相对深度图和图像特征
-        rel_depth, img_feat, (resize_h, resize_w) = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
-        # rel_depth = (rel_depth - rel_depth.min()) / (rel_depth.max() - rel_depth.min())
-
-        # 获取稀疏尺度
-        # rel_depth_invalid = (rel_depth == 0)
-        # rel_depth[rel_depth_invalid] = 1
-        # sparse_scale = torch.div(sparse_depth, rel_depth)
-        # sparse_scale[rel_depth_invalid] = 0
-        # rel_depth[rel_depth_invalid] = 0
-
-        # 获取置信度图
-        confidence_map = torch.zeros_like(sparse_depth)
-        mask = (sparse_depth > 0.0001)
-        confidence_map[mask] = 1.0
-
-        # 归一化尺度
-        # B = sparse_scale.shape[0]
-        # max_val = torch.quantile(
-        #     sparse_scale.reshape(B, -1), 1., dim=1, keepdim=True)[:, :, None, None]
-        # sparse_scale = sparse_scale / max_val 
+        # 图像特征
+        img_feat, (resize_h, resize_w) = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
 
         patch_h = resize_h // 14
         patch_w = resize_w // 14   # (B, n, d)
-        # output_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
-        # output_scale = output_scale * max_val
 
         # 直接回归depth
-        output_depth = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_depth, prefill_depth, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
+        output_depth = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_depth=sparse_depth, d_clear=d_clear, prefill_depth=prefill_depth, img_size=image.shape[2:])    # (B, 518, W0) ---> (B, H, W)
 
-        # output_depth = torch.mul(output_scale, rel_depth)
         generated = {
-            # 'rel_depth': rel_depth,
-            # 'output_scale': output_scale, 
-            'output_depth': output_depth
+            'prefill_depth': prefill_depth,
+            'output_depth0': output_depth[0],
+            'output_depth1': output_depth[1],
+            'output_depth2': output_depth[2],
+            'output_depth3': output_depth[3],
         }
 
         # Compute loss function 
@@ -186,12 +166,14 @@ class Train_net(torch.nn.Module):
 
     def compute_loss(self, output_depth, gt, loss_weights):
         # loss_gt
-        # gt_mask = (gt > 1e-3)
-        # valid_points = gt_mask.sum()
-        # loss_gt = torch.sum(torch.abs(output_depth - gt ) * gt_mask) / (valid_points + 1e-6)
 
-        loss_l1 = losses.l1loss(pred=output_depth, gt=gt, max_depth=90)
-        loss_l2 = losses.l2loss(pred=output_depth, gt=gt, max_depth=90)
+        # loss_l1 = losses.l1loss(pred=output_depth, gt=gt, max_depth=90)
+        # loss_l2 = losses.l2loss(pred=output_depth, gt=gt, max_depth=90)
+
+        loss_l1 = losses.l1_multiscale(preds=output_depth, target=gt)
+        loss_l2 = losses.l2_multiscale(preds=output_depth, target=gt)
+
+
         # loss_e
         # output_depth_norm = torch.zeros_like(output_depth)
         # for i, od in enumerate(output_depth):
@@ -232,11 +214,11 @@ class Train_net(torch.nn.Module):
 
 
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
-        image, sparse_depth, gt, prefill_depth = \
-            inputs['image'], inputs['sparse_depth'], inputs['gt'], inputs['prefill_depth']
+        image, sparse_depth, gt, prefill_depth, d_clear = \
+            inputs['image'], inputs['sparse_depth'], inputs['gt'], inputs['prefill_depth'], inputs['d_clear']
         
         # 获取相对深度图和图像特征
-        rel_depth, img_feat, (resize_h, resize_w) = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
+        img_feat, (resize_h, resize_w) = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
 
         # 获取稀疏尺度
         # rel_depth_invalid = (rel_depth == 0)
@@ -246,9 +228,9 @@ class Train_net(torch.nn.Module):
         # rel_depth[rel_depth_invalid] = 0
 
         # 获取置信度图
-        confidence_map = torch.zeros_like(sparse_depth)
-        mask = (sparse_depth > 0.0001)
-        confidence_map[mask] = 1.0
+        # confidence_map = torch.zeros_like(sparse_depth)
+        # mask = (sparse_depth > 0.0001)
+        # confidence_map[mask] = 1.0
 
         # 归一化尺度
         # B = sparse_scale.shape[0]
@@ -258,14 +240,14 @@ class Train_net(torch.nn.Module):
         
         patch_h = resize_h // 14
         patch_w = resize_w // 14   # (B, n, d)
-        output_depth = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_depth, prefill_depth, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
-        # output_scale = output_scale * max_val
-        
-        # output_depth = torch.mul(output_scale, rel_depth)
+        output_depth = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_depth=sparse_depth, d_clear=d_clear, prefill_depth=prefill_depth, img_size=image.shape[2:])    # (B, 518, W0) ---> (B, H, W)
+
         generated = {
-            # 'rel_depth': rel_depth,
-            # 'output_scale': output_scale, 
-            'output_depth': output_depth
+            'prefill_depth': prefill_depth,
+            'output_depth0': output_depth[0],
+            'output_depth1': output_depth[1],
+            'output_depth2': output_depth[2],
+            'output_depth3': output_depth[3],
         }
         
         # output_depth = output_depth.cpu().numpy()
@@ -278,7 +260,7 @@ class Train_net(torch.nn.Module):
         # metrics['imae'] = eval_utils.inv_mean_abs_err(0.001 * output_depth, 0.001 * gt)
         # metrics['irmse'] = eval_utils.inv_root_mean_sq_err(0.001 * output_depth, 0.001 * gt)
 
-        metrics = eval_utils.evaluate(gt=gt, pred=output_depth)
+        metrics = eval_utils.evaluate(gt=gt, pred=output_depth[3])
 
         return metrics, generated
 
@@ -314,7 +296,8 @@ class Train_net(torch.nn.Module):
             logger.info(f"iter loaded: {iter}")
         
         depth_anything_ckpt_path = pretrained_weights.get('depth_anything_ckpt', None)
-        self.depth_anything.load_state_dict(torch.load(depth_anything_ckpt_path))
+        m, u = self.depth_anything.load_state_dict(torch.load(depth_anything_ckpt_path), strict=False)
+        logger.info(f"scale_model loaded, missing keys: {len(m)}, unexpected keys: {len(u)}")
         
         return iter
 

@@ -174,29 +174,29 @@ class DepthAnythingV2(nn.Module):
         self.encoder = encoder
         self.pretrained = DINOv2(model_name=encoder)
         self.norm = Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        self.depth_head = DPTHead(self.pretrained.embed_dim, features, use_bn, out_channels=out_channels, use_clstoken=use_clstoken)
+        # self.depth_head = DPTHead(self.pretrained.embed_dim, features, use_bn, out_channels=out_channels, use_clstoken=use_clstoken)
     
     def forward(self, x):
-        patch_h, patch_w = x.shape[-2] // 14, x.shape[-1] // 14
+        # patch_h, patch_w = x.shape[-2] // 14, x.shape[-1] // 14
         
         features = self.pretrained.get_intermediate_layers(x, self.intermediate_layer_idx[self.encoder], return_class_token=True)
         
-        depth = self.depth_head(features, patch_h, patch_w) # * self.max_depth
+        # depth = self.depth_head(features, patch_h, patch_w) # * self.max_depth
         
-        return depth, features
+        return features
     
-    @torch.no_grad()
+    
     def infer_image(self, raw_image, input_size=518):
         # image, (h, w) = self.image2tensor(raw_image, input_size)
         raw_img_size = raw_image.shape[2:]
         image = self.resize_image(raw_image, input_size)
         image = self.norm(image)
         
-        depth, features = self.forward(image)
+        features = self.forward(image)
         
-        depth = F.interpolate(depth, raw_img_size, mode="bilinear", align_corners=True)
+        # depth = F.interpolate(depth, raw_img_size, mode="bilinear", align_corners=True)
         
-        return depth, features, image.shape[2:]
+        return features, image.shape[2:]
     
     def image2tensor(self, raw_image, input_size=518):        
         transform = Compose([

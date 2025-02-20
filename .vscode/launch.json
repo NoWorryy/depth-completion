@@ -6,11 +6,11 @@
 //             "name": "Python: Current File",
 //             "type": "debugpy",
 //             "request": "launch",
-//             "program": "src/test.py",
+//             "program": "src/datasets.py",
 //             "console": "integratedTerminal",
 //             "justMyCode": true,
 //             "cwd": "/home/sbq/codes/depth-completion/",
-//             "env": {"CUDA_VISIBLE_DEVICES": "0"}
+//             "env": {"CUDA_VISIBLE_DEVICES": "4"}
 //         }
 //     ]
 // }
@@ -28,7 +28,7 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "cwd": "/home/sbq/codes/depth-completion/",
-            "env": {"CUDA_VISIBLE_DEVICES": "3"},
+            "env": {"CUDA_VISIBLE_DEVICES": "4", "MASTER_ADDR": "localhost", "MASTER_PORT": "29502"},
             "args":["--nproc_per_node=1", "--nnodes=1", "src/trainer.py"]
         }
     ]

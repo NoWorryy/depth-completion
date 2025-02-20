@@ -19,11 +19,11 @@ model_params:
 
 # Training settings
 train_params:
-  n_batch: 3
+  n_batch: 2
   n_batch_test: 4
   n_height: 256
   n_width: 1216
-  n_thread: 24
+  n_thread: 8
   device: 'gpu'
   lr_scale: 2.0e-4
   # learning_rates: [0.5e-4, 1.0e-4, 1.5e-4, 1.0e-4, 0.5e-4, 0.2e-4] # 对应epoch
