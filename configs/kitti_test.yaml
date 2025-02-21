@@ -20,7 +20,7 @@ model_params:
 # Training settings
 train_params:
   n_batch: 3
-  n_batch_test: 5
+  n_batch_test: 4
   n_height: 256
   n_width: 1216
   n_thread: 8
