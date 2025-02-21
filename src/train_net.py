@@ -101,7 +101,7 @@ class Train_net(torch.nn.Module):
         return:
         """
         # Set models to training mode
-        self.depth_anything.train()
+        self.depth_anything.eval()
         self.depth_anything.requires_grad_(False)
 
         self.scale_model.train()
