@@ -30,6 +30,7 @@ class Train_net(torch.nn.Module):
         self.augmentation_schedule_pos = 0
         self.augmentation_probability = train_params['augmentation_probabilities'][0]
 
+        self.use_dino = model_params['use_dino']
         # Initialize the Accelerator
         if mode == 'train':
             logger.info('Initializing the Accelerator:')
@@ -53,7 +54,9 @@ class Train_net(torch.nn.Module):
         }
         scale_config = model_configs[model_params['depth_anything']['encoder']]
 
-        self.depth_anything = DepthAnythingV2(**scale_config)
+        if self.use_dino:
+            self.depth_anything = DepthAnythingV2(**scale_config)
+            self.depth_anything.to(self.device)
 
         self.scale_model = ScaleModel(nclass=1,
                                       in_channels=scale_config['embed_dim'],
@@ -61,12 +64,10 @@ class Train_net(torch.nn.Module):
                                       out_channels=scale_config['out_channels'],
                                       use_bn=False,
                                       use_clstoken=False,
+                                      use_dino=False,
                                       use_prefill=model_params['scale_model_params']['use_prefill'],
                                       output_act='ReLU')
-        
-        # self.outlier_removal = OutlierRemoval(**model_params['outlier_params'])
-
-        self.depth_anything.to(self.device)
+                
         self.scale_model.to(self.device)
    
         logger.info('Models initialized.')
@@ -92,7 +93,7 @@ class Train_net(torch.nn.Module):
         # self.train_transforms = Transforms(**train_params['aug_params'])
         if mode == 'test':
             self.scale_model = torch.nn.DataParallel(self.scale_model)
-            self.depth_anything = torch.nn.DataParallel(self.depth_anything)
+            # self.depth_anything = torch.nn.DataParallel(self.depth_anything)
 
 
     def forward(self, inputs):
@@ -101,8 +102,9 @@ class Train_net(torch.nn.Module):
         return:
         """
         # Set models to training mode
-        self.depth_anything.train()
-        self.depth_anything.requires_grad_(False)
+        if self.use_dino:
+            self.depth_anything.eval()
+            self.depth_anything.requires_grad_(False)
 
         self.scale_model.train()
         self.scale_model.requires_grad_(True)
@@ -114,13 +116,16 @@ class Train_net(torch.nn.Module):
             inputs['image'], inputs['sparse_depth'], inputs['gt'], inputs['prefill_depth'], inputs['d_clear']
         
         # 图像特征
-        img_feat, (resize_h, resize_w) = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
+        if self.use_dino:
+            img_feat, (resize_h, resize_w) = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
 
-        patch_h = resize_h // 14
-        patch_w = resize_w // 14   # (B, n, d)
+            patch_h = resize_h // 14
+            patch_w = resize_w // 14   # (B, n, d)
 
-        # 直接回归depth
-        output_depth = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_depth=sparse_depth, d_clear=d_clear, prefill_depth=prefill_depth, img_size=image.shape[2:])    # (B, 518, W0) ---> (B, H, W)
+            # 直接回归depth
+            output_depth = self.scale_model.forward(img_feat, patch_h, patch_w, image=image, sparse_depth=sparse_depth, d_clear=d_clear, prefill_depth=prefill_depth, img_size=image.shape[2:])    # (B, 518, W0) ---> (B, H, W)
+        else:
+            output_depth = self.scale_model.forward(image=image, sparse_depth=sparse_depth, d_clear=d_clear, prefill_depth=prefill_depth, img_size=image.shape[2:])    # (B, 518, W0) ---> (B, H, W)
 
         generated = {
             'prefill_depth': prefill_depth,
@@ -206,8 +211,9 @@ class Train_net(torch.nn.Module):
     def validate(self, inputs):
 
         # Set models to test mode
-        self.depth_anything.eval()
-        self.depth_anything.requires_grad_(False)
+        if self.use_dino:
+            self.depth_anything.eval()
+            self.depth_anything.requires_grad_(False)
 
         self.scale_model.eval()
         self.scale_model.requires_grad_(False)
@@ -218,7 +224,12 @@ class Train_net(torch.nn.Module):
             inputs['image'], inputs['sparse_depth'], inputs['gt'], inputs['prefill_depth'], inputs['d_clear']
         
         # 获取相对深度图和图像特征
-        img_feat, (resize_h, resize_w) = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
+        if self.use_dino:
+            img_feat, (resize_h, resize_w) = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
+
+            patch_h = resize_h // 14
+            patch_w = resize_w // 14   # (B, n, d)
+            output_depth = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_depth=sparse_depth, d_clear=d_clear, prefill_depth=prefill_depth, img_size=image.shape[2:])    # (B, 518, W0) ---> (B, H, W)
 
         # 获取稀疏尺度
         # rel_depth_invalid = (rel_depth == 0)
@@ -238,9 +249,8 @@ class Train_net(torch.nn.Module):
         #     sparse_scale.reshape(B, -1), 1., dim=1, keepdim=True)[:, :, None, None]
         # sparse_scale = sparse_scale / max_val 
         
-        patch_h = resize_h // 14
-        patch_w = resize_w // 14   # (B, n, d)
-        output_depth = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_depth=sparse_depth, d_clear=d_clear, prefill_depth=prefill_depth, img_size=image.shape[2:])    # (B, 518, W0) ---> (B, H, W)
+        else:
+            output_depth = self.scale_model.forward(image=image, sparse_depth=sparse_depth, d_clear=d_clear, prefill_depth=prefill_depth, img_size=image.shape[2:])    # (B, 518, W0) ---> (B, H, W)
 
         generated = {
             'prefill_depth': prefill_depth,
@@ -294,10 +304,10 @@ class Train_net(torch.nn.Module):
   
             iter = ckpt.get('iter', 0)
             logger.info(f"iter loaded: {iter}")
-        
-        depth_anything_ckpt_path = pretrained_weights.get('depth_anything_ckpt', None)
-        m, u = self.depth_anything.load_state_dict(torch.load(depth_anything_ckpt_path), strict=False)
-        logger.info(f"scale_model loaded, missing keys: {len(m)}, unexpected keys: {len(u)}")
+        if self.use_dino:   
+            depth_anything_ckpt_path = pretrained_weights.get('depth_anything_ckpt', None)
+            m, u = self.depth_anything.load_state_dict(torch.load(depth_anything_ckpt_path), strict=False)
+            logger.info(f"scale_model loaded, missing keys: {len(m)}, unexpected keys: {len(u)}")
         
         return iter
 

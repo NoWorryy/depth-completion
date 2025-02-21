@@ -28,7 +28,7 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "cwd": "/home/sbq/codes/depth-completion/",
-            "env": {"CUDA_VISIBLE_DEVICES": "4", "MASTER_ADDR": "localhost", "MASTER_PORT": "29502"},
+            "env": {"CUDA_VISIBLE_DEVICES": "5", "MASTER_ADDR": "localhost", "MASTER_PORT": "29502"},
             "args":["--nproc_per_node=1", "--nnodes=1", "src/trainer.py"]
         }
     ]

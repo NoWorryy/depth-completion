@@ -159,16 +159,22 @@ class Post_process_deconv(nn.Module):
 
 class Guide(nn.Module):
 
-    def __init__(self, c1, c2, norm_layer=None):
+    def __init__(self, c1, c2, norm_layer=None, use_dino = False):
         super().__init__()
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
-        self.conv = Basic2d(c1+c2, c1, norm_layer)
+        if use_dino:
+            self.conv = Basic2d(c1+c2+c2, c1, norm_layer)
+        else:
+            self.conv = Basic2d(c1+c2, c1, norm_layer)
 
-    def forward(self, lidar, weight):
-        weight = F.interpolate(
-                weight, lidar.shape[2:], mode='bilinear', align_corners=False)
-        weight = torch.cat((lidar, weight), dim=1)
+    def forward(self, lidar, weight, img_dino=None):
+        if img_dino is not None:
+            img_dino = F.interpolate(
+                    img_dino, lidar.shape[2:], mode='bilinear', align_corners=False)
+            weight = torch.cat((lidar, weight, img_dino), dim=1)
+        else:
+            weight = torch.cat((lidar, weight), dim=1)
         weight = self.conv(weight)
         return weight
     
@@ -249,69 +255,67 @@ class ScaleModel(nn.Module):
                  use_clstoken=False,
                  use_spn=False,
                  use_prefill=False,
+                 use_dino = False,
                  output_act='sigmoid',
                  block=StoDepth_BasicBlock,
                  guide=Guide
                  ):
         
         super(ScaleModel, self).__init__()
-
-        self.nclass = nclass
-        self.use_clstoken = use_clstoken
-        self.use_spn = use_spn
-        self.use_prefill = use_prefill
-
-        self.projects = nn.ModuleList([
-            nn.Conv2d(
-                in_channels=in_channels,
-                out_channels=out_channel,
-                kernel_size=1,
-                stride=1,
-                padding=0,
-            ) for out_channel in out_channels
-        ])
-
-        self.resize_layers = nn.ModuleList([
-            nn.ConvTranspose2d(
-                in_channels=out_channels[0],
-                out_channels=out_channels[0],
-                kernel_size=4,
-                stride=4,
-                padding=0),
-            nn.ConvTranspose2d(
-                in_channels=out_channels[1],
-                out_channels=out_channels[1],
-                kernel_size=2,
-                stride=2,
-                padding=0),
-            nn.Identity(),
-            nn.Conv2d(
-                in_channels=out_channels[3],
-                out_channels=out_channels[3],
-                kernel_size=3,
-                stride=2,
-                padding=1)
-        ])
-
-        if use_clstoken:
-            self.readout_projects = nn.ModuleList()
-            for _ in range(len(self.projects)):
-                self.readout_projects.append(
-                    nn.Sequential(
-                        nn.Linear(2 * in_channels, in_channels),
-                        nn.GELU()))
-
-        self.scratch = _make_scratch(
-            out_channels,
-            [128, 256, 256, 256],
-            groups=1,
-            expand=False,
-        )
-
         
-        if self.use_spn:
-            self.weight_offset = BasicDepthEncoder(kernel_size=3, bc=64, norm_layer=nn.BatchNorm2d)
-            self.Post_process = Post_process_deconv(dkn_residual=True, kernel_size=3)
+        self.use_dino = use_dino
+        if use_dino:
+            self.nclass = nclass
+            self.use_clstoken = use_clstoken
+            self.use_spn = use_spn
+            self.use_prefill = use_prefill
+
+            self.projects = nn.ModuleList([
+                nn.Conv2d(
+                    in_channels=in_channels,
+                    out_channels=out_channel,
+                    kernel_size=1,
+                    stride=1,
+                    padding=0,
+                ) for out_channel in out_channels
+            ])
+
+            self.resize_layers = nn.ModuleList([
+                nn.ConvTranspose2d(
+                    in_channels=out_channels[0],
+                    out_channels=out_channels[0],
+                    kernel_size=4,
+                    stride=4,
+                    padding=0),
+                nn.ConvTranspose2d(
+                    in_channels=out_channels[1],
+                    out_channels=out_channels[1],
+                    kernel_size=2,
+                    stride=2,
+                    padding=0),
+                nn.Identity(),
+                nn.Conv2d(
+                    in_channels=out_channels[3],
+                    out_channels=out_channels[3],
+                    kernel_size=3,
+                    stride=2,
+                    padding=1)
+            ])
+
+            if use_clstoken:
+                self.readout_projects = nn.ModuleList()
+                for _ in range(len(self.projects)):
+                    self.readout_projects.append(
+                        nn.Sequential(
+                            nn.Linear(2 * in_channels, in_channels),
+                            nn.GELU()))
+
+            self.scratch = _make_scratch(
+                out_channels,
+                [128, 256, 256, 256],
+                groups=1,
+                expand=False,
+            )
         
 
         bc = 16
@@ -319,8 +323,6 @@ class ScaleModel(nn.Module):
         layers=(2, 2, 2, 2, 2)
         self._norm_layer=nn.BatchNorm2d
         self.preserve_input = True
-        
-    
 
         prob_0_L = (1, 0.5)
         self.multFlag = True
@@ -328,28 +330,29 @@ class ScaleModel(nn.Module):
         self.prob_delta = prob_0_L[0] - prob_0_L[1]
         self.prob_step = self.prob_delta / (sum(layers) - 1)
 
+        self.conv_img = Basic2d(3, bc * 2, norm_layer=self._norm_layer, kernel_size=5, padding=2)
         self.conv_lidar = Basic2d(1, bc * 2, norm_layer=None, kernel_size=5, padding=2)
         in_channels = bc * 2
 
         self.inplanes = 32     # 32
-        self.layer1_lidar = self._make_layer(block, 64, layers[0], stride=1)   # 32-->64
-        # self.guide1 = guide(in_channels * 2, in_channels * 2, self._norm_layer)
+        self.layer1_img, self.layer1_lidar = self._make_layer(block, 64, layers[0], stride=1)   # 32-->64
+        self.guide1 = guide(64, 64, self._norm_layer, use_dino)
 
         self.inplanes = 64
-        self.layer2_lidar = self._make_layer(block, 128, layers[1], stride=2)   # 64-->128
-        self.guide2 = guide(128, 128, self._norm_layer)
+        self.layer2_img, self.layer2_lidar = self._make_layer(block, 128, layers[1], stride=2)   # 64-->128
+        self.guide2 = guide(128, 128, self._norm_layer, use_dino)
 
         self.inplanes = 128
-        self.layer3_lidar = self._make_layer(block, 256, layers[2], stride=2)   # 128-->256
-        self.guide3 = guide(256, 256, self._norm_layer)
+        self.layer3_img, self.layer3_lidar = self._make_layer(block, 256, layers[2], stride=2)   # 128-->256
+        self.guide3 = guide(256, 256, self._norm_layer, use_dino)
 
         self.inplanes = 256
-        self.layer4_lidar = self._make_layer(block, 256, layers[3], stride=2)   # 256-->256
-        self.guide4 = guide(256, 256, self._norm_layer)
+        self.layer4_img, self.layer4_lidar = self._make_layer(block, 256, layers[3], stride=2)   # 256-->256
+        self.guide4 = guide(256, 256, self._norm_layer, use_dino)
 
         self.inplanes = 256
-        self.layer5_lidar = self._make_layer(block, 256, layers[4], stride=2)   # 256-->256
-        self.guide5 = guide(256, 256, self._norm_layer)
+        self.layer5_img, self.layer5_lidar = self._make_layer(block, 256, layers[4], stride=2)   # 256-->256
+        self.guide5 = guide(256, 256, self._norm_layer, use_dino)
         
         self.layer4d = Basic2dTrans(in_channels * 8, in_channels * 8, self._norm_layer)
         self.upproj0 = nn.Sequential(
@@ -381,60 +384,75 @@ class ScaleModel(nn.Module):
 
     def _make_layer(self, block, planes, blocks, stride=1):
         norm_layer = self._norm_layer
-        depth_downsample = None
+        img_downsample, depth_downsample = None, None
         if stride != 1 or self.inplanes != planes :
+            img_downsample = nn.Sequential(
+                Conv1x1(self.inplanes, planes, stride),
+                norm_layer(planes),
+            )
             depth_downsample = nn.Sequential(
                 Conv1x1(self.inplanes, planes, stride),
                 norm_layer(planes),
             )
 
         m = torch.distributions.bernoulli.Bernoulli(torch.Tensor([self.prob_now]))
+        img_layers = [block(self.prob_now, m, self.multFlag, self.inplanes, planes, stride, img_downsample)]
         depth_layers = [block(self.prob_now, m, self.multFlag, self.inplanes, planes, stride, depth_downsample)]
         self.prob_now = self.prob_now - self.prob_step
         self.inplanes = planes
 
         for _ in range(1, blocks):
             m = torch.distributions.bernoulli.Bernoulli(torch.Tensor([self.prob_now]))
+            img_layers.append(block(self.prob_now, m, self.multFlag, self.inplanes, planes))
             depth_layers.append(block(self.prob_now, m, self.multFlag, self.inplanes, planes))
             self.prob_now = self.prob_now - self.prob_step
 
-        return nn.Sequential(*depth_layers)
+        return nn.Sequential(*img_layers), nn.Sequential(*depth_layers)
 
 
 
-    def forward(self, out_features, patch_h, patch_w, sparse_depth=None, d_clear=None, prefill_depth=None, certainty=None, img_size=(256, 1216)):
-        # out0 = []
-        out = []
-        for i, x in enumerate(out_features):
-            x = x[0]
-            x = x.permute(0, 2, 1).reshape((x.shape[0], x.shape[-1], patch_h, patch_w))    # (1, ci, 37, 123)
-            x = self.projects[i](x)         # 大小不变 分别输出四个channel的特征    (1, ci, 37, 123)
-            y = self.resize_layers[i](x)    # (1, c1, 148, 492) (1, c2, 74, 246) (1, c3, 37, 123) (1, c4, 19, 62)
-            out.append(y)
+    def forward(self, out_features=None, patch_h=None, patch_w=None, image=None, sparse_depth=None, d_clear=None, prefill_depth=None, certainty=None, img_size=(256, 1216)):
+        if self.use_dino:
+            out = []
+            for i, x in enumerate(out_features):
+                x = x[0]
+                x = x.permute(0, 2, 1).reshape((x.shape[0], x.shape[-1], patch_h, patch_w))    # (1, ci, 37, 123)
+                x = self.projects[i](x)         # 大小不变 分别输出四个channel的特征    (1, ci, 37, 123)
+                y = self.resize_layers[i](x)    # (1, c1, 148, 492) (1, c2, 74, 246) (1, c3, 37, 123) (1, c4, 19, 62)
+                out.append(y)
 
-        layer_1, layer_2, layer_3, layer_4 = out    # (1, 96, 148, 704) (b, 192, 74, 352) (b, 384, 37, 176) (b, 768, 19, 88)
+            layer_0, layer_1, layer_2, layer_3, layer_4 = out    # (1, 96, 148, 704) (b, 192, 74, 352) (b, 384, 37, 176) (b, 768, 19, 88)
         
+            c1_img_dino = self.scratch.layer1_rn(layer_0)    # 都把通道数转化成指定值 feature：64
+            c2_img_dino = self.scratch.layer1_rn(layer_1)    # 都把通道数转化成指定值 feature：128
+            c3_img_dino = self.scratch.layer2_rn(layer_2)    # 256
+            c4_img_dino = self.scratch.layer3_rn(layer_3)    # 256
+            c5_img_dino = self.scratch.layer4_rn(layer_4)    # 256
+        else:
+            c1_img_dino, c2_img_dino, c3_img_dino, c4_img_dino, c5_img_dino = None, None, None, None, None
 
-        c2_img = self.scratch.layer1_rn(layer_1)    # 都把通道数转化成指定值 feature：128
-        c3_img = self.scratch.layer2_rn(layer_2)    # 256
-        c4_img = self.scratch.layer3_rn(layer_3)    # 256
-        c5_img = self.scratch.layer4_rn(layer_4)    # 256
-
+        c0_img = self.conv_img(image)
         c0_lidar = self.conv_lidar(sparse_depth)    # 32
+
+        c1_img = self.layer1_img(c0_img)
         c1_lidar = self.layer1_lidar(c0_lidar)      # 64
-        # c1_lidar_dyn = self.guide1(c1_lidar, c1_img)
+        c1_lidar_dyn = self.guide1(c1_lidar, c1_img, c1_img_dino)
 
-        c2_lidar = self.layer2_lidar(c1_lidar)      # 128
-        c2_lidar_dyn = self.guide2(c2_lidar, c2_img)
+        c2_img = self.layer2_img(c1_img)
+        c2_lidar = self.layer2_lidar(c1_lidar_dyn)      # 128
+        c2_lidar_dyn = self.guide2(c2_lidar, c2_img, c2_img_dino)
 
+        c3_img = self.layer3_img(c2_img)
         c3_lidar = self.layer3_lidar(c2_lidar_dyn)  # 256
-        c3_lidar_dyn = self.guide3(c3_lidar, c3_img)
+        c3_lidar_dyn = self.guide3(c3_lidar, c3_img, c3_img_dino)
 
+        c4_img = self.layer4_img(c3_img)
         c4_lidar = self.layer4_lidar(c3_lidar_dyn)  # 256
-        c4_lidar_dyn = self.guide4(c4_lidar, c4_img)
-
+        c4_lidar_dyn = self.guide4(c4_lidar, c4_img, c4_img_dino)
+        
+        c5_img = self.layer5_img(c4_img)
         c5_lidar = self.layer5_lidar(c4_lidar_dyn)  # 256
-        c5_lidar_dyn = self.guide5(c5_lidar, c5_img)
+        c5_lidar_dyn = self.guide5(c5_lidar, c5_img, c5_img_dino)
 
         depth_predictions = []
         c5 = c5_lidar_dyn
@@ -481,7 +499,7 @@ class ScaleModel(nn.Module):
         depth_predictions.append(output)
 
         dc1 = self.layer1d(c2)
-        c1 = dc1 + c1_lidar
+        c1 = dc1 + c1_lidar_dyn
         c1 = self.conv(c1)
         c0 = c1 + c0_lidar
         if self.preserve_input:

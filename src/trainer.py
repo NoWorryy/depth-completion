@@ -66,8 +66,12 @@ def main(device: str,
                         pretrained_weights = pretrained_weights)
 
     # trainer = torch.nn.DataParallel(trainer)
-    trainer.depth_anything, trainer.scale_model, trainer.optimizer_scale_model, dataloader, val_dataloader = trainer.accelerator.prepare(
-        trainer.depth_anything, trainer.scale_model, trainer.optimizer_scale_model, dataloader, val_dataloader)
+    if model_params['use_dino']:
+        trainer.depth_anything, trainer.scale_model, trainer.optimizer_scale_model, dataloader, val_dataloader = trainer.accelerator.prepare(
+            trainer.depth_anything, trainer.scale_model, trainer.optimizer_scale_model, dataloader, val_dataloader)
+    else:
+        trainer.scale_model, trainer.optimizer_scale_model, dataloader, val_dataloader = trainer.accelerator.prepare(
+            trainer.scale_model, trainer.optimizer_scale_model, dataloader, val_dataloader)
     
     # from torch.nn.parallel import DistributedDataParallel as DDP
 
@@ -76,7 +80,8 @@ def main(device: str,
 
 
     if torch.cuda.device_count() > 1:
-        trainer.depth_anything = torch.nn.SyncBatchNorm.convert_sync_batchnorm(trainer.depth_anything)
+        if model_params['use_dino']:
+            trainer.depth_anything = torch.nn.SyncBatchNorm.convert_sync_batchnorm(trainer.depth_anything)
         trainer.scale_model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(trainer.scale_model)
 
     # output setting
