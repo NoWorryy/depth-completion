@@ -66,13 +66,13 @@ def main(device: str,
                         pretrained_weights = pretrained_weights)
 
     # trainer = torch.nn.DataParallel(trainer)
-    trainer.depth_anything, trainer.scale_model, trainer.optimizer_scale_model, dataloader, val_dataloader = trainer.accelerator.prepare(
-        trainer.depth_anything, trainer.scale_model, trainer.optimizer_scale_model, dataloader, val_dataloader)
+    trainer.depth_anything, trainer.optimizer_scale_model, dataloader, val_dataloader = trainer.accelerator.prepare(
+        trainer.depth_anything, trainer.optimizer_scale_model, dataloader, val_dataloader)
     # trainer.accelerator.register_for_checkpointing(trainer.scheduler_scale_model)
 
     if torch.cuda.device_count() > 1:
         trainer.depth_anything = torch.nn.SyncBatchNorm.convert_sync_batchnorm(trainer.depth_anything)
-        trainer.scale_model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(trainer.scale_model)
+        # trainer.scale_model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(trainer.scale_model)
 
     # output setting
     folder_name = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
@@ -82,11 +82,9 @@ def main(device: str,
 
     # training
     train_data_length = len(dataloader)     # 72400 --> 3017
-    train_data_length_bs7 = 85898 // 21 + 1
-    start_epoch = trainer.iter // train_data_length_bs7
+    start_epoch = trainer.epoch
     max_epoch = train_params['learning_schedule'][-1]
-    max_train_steps = max_epoch * train_data_length
-    iteration = trainer.iter
+    max_train_steps = (max_epoch - start_epoch) * train_data_length
 
     if trainer.accelerator.is_main_process:
         os.makedirs(output_dir, exist_ok=True)
@@ -97,7 +95,7 @@ def main(device: str,
 
         tb_writer = SummaryWriter(log_dir = event_path)
 
-        progress_bar = tqdm(range(iteration, max_train_steps))
+        progress_bar = tqdm(range(max_train_steps))
         progress_bar.set_description("Steps")
 
         cmap = matplotlib.colormaps.get_cmap('Spectral_r')
@@ -154,28 +152,16 @@ def main(device: str,
                     # 保存图像 这里都是(b, c, h, w)
                     img = inputs['image'][0].permute(1,2,0).detach().cpu().numpy() * 255.0
 
-                    sd = inputs['sparse_depth'][0].squeeze(0).detach().cpu().numpy()
-                    sd = (sd - sd.min()) / (sd.max() - sd.min()) * 255.0
-                    sd = (cmap(sd.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
-
                     rel_depth = generated['rel_depth'][0].squeeze(0).detach().cpu().numpy()
                     rel_depth = (rel_depth - rel_depth.min()) / (rel_depth.max() - rel_depth.min()) * 255.0
                     rel_depth = (cmap(rel_depth.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
-
-                    output_depth = generated['output_depth'][0].squeeze(0).detach().cpu().numpy()
-                    output_depth = (output_depth - output_depth.min()) / (output_depth.max() - output_depth.min()) * 255.0
-                    output_depth = (cmap(output_depth.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
-
-                    output_scale = generated['output_scale'][0].squeeze(0).detach().cpu().numpy()
-                    output_scale = (output_scale - output_scale.min()) / (output_scale.max() - output_scale.min()) * 255.0
-                    output_scale = (cmap(output_scale.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
                     gt = inputs['gt'][0].squeeze(0).detach().cpu().numpy()
                     gt = (gt - gt.min()) / (gt.max() - gt.min()) * 255.0
                     gt = (cmap(gt.astype(np.uint8))[:, :, :3] * 255)[:, :, ::-1].astype(np.uint8)
 
-                    train_data_pair = np.concatenate((img, sd, rel_depth, output_scale, output_depth, gt), axis=0)
-                    cv2.imwrite(f"{output_dir}/output_image/{f'train_img_sd_output_gt-{iteration}'}.png", train_data_pair)
+                    train_data_pair = np.concatenate((img, rel_depth, gt), axis=0)
+                    cv2.imwrite(f"{output_dir}/output_image/{f'train_img_output_gt-{iteration}'}.png", train_data_pair)
                 
                 for name, param in trainer.named_parameters():
                     if param.grad is not None:

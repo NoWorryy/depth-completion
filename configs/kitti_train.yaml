@@ -19,16 +19,16 @@ model_params:
 
 # Training settings
 train_params:
-  n_batch: 3
+  n_batch: 1
   n_batch_test: 4
   n_height: 256
   n_width: 1216
   n_thread: 24
   device: 'gpu'
-  lr_scale: 2.0e-4
+  lr_scale: 1.0e-3
   # learning_rates: [0.5e-4, 1.0e-4, 1.5e-4, 1.0e-4, 0.5e-4, 0.2e-4] # 对应epoch
   # learning_schedule: [2, 8, 20, 30, 45, 60]
-  learning_schedule: [2, 10, 20, 30]
+  learning_schedule: [5, 10, 15, 20]
 
   patch_size: 14
 
@@ -74,5 +74,5 @@ dataset_val_params:
 
 
 pretrained_weights:
-  model_path: '/home/sbq/codes/depth-completion/ckpt/kitti/2025-02-19T00-33-22/checkpoints/ckpt_iter_33000.pth'
+  model_path: 
   depth_anything_ckpt: '/home/sbq/codes/Depth-Anything-V2/metric_depth/ckpt/depth_anything_v2_metric_vkitti_vitb.pth'

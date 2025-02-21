@@ -198,3 +198,14 @@ def l1loss(pred, gt, max_depth):
     loss = loss.mean()
 
     return loss
+
+import torch.nn.functional as F
+def ncc_loss(predict, gt):
+    mask = (gt > 0).type_as(predict).detach()
+    predict = predict * mask
+
+    bs = predict.shape[0]
+    predict_v = predict.view(bs, -1)
+    gt_v = gt.view(bs, -1)
+    ncc = F.cosine_similarity(predict_v, gt_v, dim=1)
+    return 1 - torch.mean(ncc)

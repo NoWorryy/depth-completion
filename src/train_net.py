@@ -55,26 +55,26 @@ class Train_net(torch.nn.Module):
 
         self.depth_anything = DepthAnythingV2(**scale_config)
 
-        self.scale_model = ScaleModel(nclass=1,
-                                      in_channels=scale_config['embed_dim'],
-                                      features=scale_config['features'],
-                                      out_channels=scale_config['out_channels'],
-                                      use_bn=False,
-                                      use_clstoken=False,
-                                      use_prefill=model_params['scale_model_params']['use_prefill'],
-                                      output_act='ReLU')
+        # self.scale_model = ScaleModel(nclass=1,
+        #                               in_channels=scale_config['embed_dim'],
+        #                               features=scale_config['features'],
+        #                               out_channels=scale_config['out_channels'],
+        #                               use_bn=False,
+        #                               use_clstoken=False,
+        #                               use_prefill=model_params['scale_model_params']['use_prefill'],
+        #                               output_act='ReLU')
         
         # self.outlier_removal = OutlierRemoval(**model_params['outlier_params'])
 
         self.depth_anything.to(self.device)
-        self.scale_model.to(self.device)
+        # self.scale_model.to(self.device)
    
         logger.info('Models initialized.')
 
 
         # 优化器初始化
         logger.info('Initializing optimizers:')
-        self.optimizer_scale_model = torch.optim.Adam(self.scale_model.parameters(), lr=train_params['lr_scale'], betas=(0.9, 0.999))
+        self.optimizer_scale_model = torch.optim.Adam(self.depth_anything.parameters(), lr=train_params['lr_scale'], betas=(0.9, 0.999))
         logger.info('Optimizers initialized.')
 
 
@@ -86,7 +86,7 @@ class Train_net(torch.nn.Module):
 
         # loss权重配置及模型加载
         self.loss_weights = train_params['loss_weights']
-        self.iter = self.load_ckpt(pretrained_weights)
+        self.iter, self.epoch = self.load_ckpt(pretrained_weights)
         logger.info('Ckpt loaded.')
 
         # self.train_transforms = Transforms(**train_params['aug_params'])
@@ -102,11 +102,12 @@ class Train_net(torch.nn.Module):
         """
         # Set models to training mode
         self.depth_anything.train()
-        self.depth_anything.requires_grad_(False)
+        self.depth_anything.requires_grad_(True)
+        self.depth_anything.zero_grad()
 
-        self.scale_model.train()
-        self.scale_model.requires_grad_(True)
-        self.optimizer_scale_model.zero_grad()
+        # self.scale_model.train()
+        # self.scale_model.requires_grad_(True)
+        # self.optimizer_scale_model.zero_grad()
 
 
         inputs = {key: value.to(self.device) for key, value in inputs.items()}
@@ -114,20 +115,20 @@ class Train_net(torch.nn.Module):
             inputs['image'], inputs['sparse_depth'], inputs['gt']
         
         # 获取相对深度图和图像特征
-        rel_depth, img_feat, (resize_h, resize_w) = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
+        rel_depth = self.depth_anything.module.infer_image(image, self.model_params['depth_anything']['input_size'])  # (h, w)
         # rel_depth = (rel_depth - rel_depth.min()) / (rel_depth.max() - rel_depth.min())
 
         # 获取稀疏尺度
-        rel_depth_invalid = (rel_depth == 0)
-        rel_depth[rel_depth_invalid] = 1
-        sparse_scale = torch.div(sparse_depth, rel_depth)
-        sparse_scale[rel_depth_invalid] = 0
-        rel_depth[rel_depth_invalid] = 0
+        # rel_depth_invalid = (rel_depth == 0)
+        # rel_depth[rel_depth_invalid] = 1
+        # sparse_scale = torch.div(sparse_depth, rel_depth)
+        # sparse_scale[rel_depth_invalid] = 0
+        # rel_depth[rel_depth_invalid] = 0
 
-        # 获取置信度图
-        confidence_map = torch.zeros_like(sparse_scale)
-        mask = (sparse_scale > 0.0001)
-        confidence_map[mask] = 1.0
+        # # 获取置信度图
+        # confidence_map = torch.zeros_like(sparse_scale)
+        # mask = (sparse_scale > 0.0001)
+        # confidence_map[mask] = 1.0
 
         # 归一化尺度
         # B = sparse_scale.shape[0]
@@ -135,20 +136,18 @@ class Train_net(torch.nn.Module):
         #     sparse_scale.reshape(B, -1), 1., dim=1, keepdim=True)[:, :, None, None]
         # sparse_scale = sparse_scale / max_val 
 
-        patch_h = resize_h // 14
-        patch_w = resize_w // 14   # (B, n, d)
-        output_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
-        # output_scale = output_scale * max_val
+        # patch_h = resize_h // 14
+        # patch_w = resize_w // 14   # (B, n, d)
+        # output_scale = self.scale_model.forward(img_feat, patch_h, patch_w, sparse_scale, img_size=image.shape[2:], certainty=confidence_map)    # (B, 518, W0) ---> (B, H, W)
+        # # output_scale = output_scale * max_val
 
-        output_depth = torch.mul(output_scale, rel_depth)
+        # output_depth = torch.mul(output_scale, rel_depth)
         generated = {
             'rel_depth': rel_depth,
-            'output_scale': output_scale, 
-            'output_depth': output_depth
         }
 
         # Compute loss function 
-        loss, loss_info = self.compute_loss(output_depth, gt, rel_depth, self.train_params['loss_weights'])
+        loss, loss_info = self.compute_loss(gt, rel_depth, self.train_params['loss_weights'])
         
         # loss.backward()
         self.accelerator.backward(loss)
@@ -181,37 +180,37 @@ class Train_net(torch.nn.Module):
         return grad_x, grad_y
 
 
-    def compute_loss(self, output_depth, gt, rel_depth, loss_weights):
+    def compute_loss(self, gt, rel_depth, loss_weights):
         # loss_gt
         # gt_mask = (gt > 1e-3)
         # valid_points = gt_mask.sum()
         # loss_gt = torch.sum(torch.abs(output_depth - gt ) * gt_mask) / (valid_points + 1e-6)
 
-        loss_gt = losses.l1loss(pred=output_depth, gt=gt, max_depth=90)
+        # loss_gt = losses.l1loss(pred=output_depth, gt=gt, max_depth=90)
 
-        # loss_e
-        output_depth_norm = torch.zeros_like(output_depth)
-        for i, od in enumerate(output_depth):
-            output_depth_norm[i] = (od - od.min()) / (od.max() - od.min())
-        grad_x_gen, grad_y_gen = self.compute_gradients(output_depth_norm)
+        # # loss_e
+        # output_depth_norm = torch.zeros_like(output_depth)
+        # for i, od in enumerate(output_depth):
+        #     output_depth_norm[i] = (od - od.min()) / (od.max() - od.min())
+        # grad_x_gen, grad_y_gen = self.compute_gradients(output_depth_norm)
 
-        rel_depth_norm = torch.zeros_like(rel_depth)
-        for i, rd in enumerate(rel_depth):
-            rel_depth_norm[i] = (rd - rd.min()) / (rd.max() - rd.min())
-        grad_x_target, grad_y_target = self.compute_gradients(rel_depth_norm)
+        # rel_depth_norm = torch.zeros_like(rel_depth)
+        # for i, rd in enumerate(rel_depth):
+        #     rel_depth_norm[i] = (rd - rd.min()) / (rd.max() - rd.min())
+        # grad_x_target, grad_y_target = self.compute_gradients(rel_depth_norm)
 
-        loss_x = torch.abs(grad_x_gen - grad_x_target)
-        loss_y = torch.abs(grad_y_gen - grad_y_target)
+        # loss_x = torch.abs(grad_x_gen - grad_x_target)
+        # loss_y = torch.abs(grad_y_gen - grad_y_target)
 
-        loss_e = loss_x.mean() + loss_y.mean()
+        # loss_e = loss_x.mean() + loss_y.mean()
 
-        # l = w_{ph}l_{ph} + w_{sz}l_{sz} + w_{sm}l_{sm}
-        loss = loss_weights['w_gt'] * loss_gt + loss_weights['w_e'] * loss_e
+        # # l = w_{ph}l_{ph} + w_{sz}l_{sz} + w_{sm}l_{sm}
+        # loss = loss_weights['w_gt'] * loss_gt + loss_weights['w_e'] * loss_e
+
+        loss = losses.ncc_loss(predict=rel_depth, gt=gt)
 
         loss_info = {
-            'loss': loss,
-            'loss_gt': loss_gt,
-            'loss_e': loss_e
+            'loss': loss
         }
 
         return loss, loss_info
@@ -287,6 +286,7 @@ class Train_net(torch.nn.Module):
     def load_ckpt(self, pretrained_weights):
         # 加载预训练权重
         iter = 0
+        epoch = 0
         model_path = pretrained_weights.get('model_path', None)
         if model_path is not None:
             logger.info(f"load model checkpoint: {model_path}")
@@ -308,15 +308,17 @@ class Train_net(torch.nn.Module):
             self.scheduler_scale_model.load_state_dict(ckpt['scheduler_scale_model'])
   
             iter = ckpt.get('iter', 0)
-            logger.info(f"iter loaded: {iter}")
+            epoch = ckpt.get('epoch', 0)
+
+            logger.info(f"epoch loaded: {epoch}, iter loaded: {iter}")
         
         depth_anything_ckpt_path = pretrained_weights.get('depth_anything_ckpt', None)
         self.depth_anything.load_state_dict(torch.load(depth_anything_ckpt_path))
         
-        return iter
+        return iter, epoch
 
 
-    def save_checkpoint(self, checkpoint_dir, iteration):
+    def save_checkpoint(self, checkpoint_dir, iteration, epoch):
         """
         Save the current state of the model, optimizers, and other necessary components.
 
@@ -329,15 +331,18 @@ class Train_net(torch.nn.Module):
         ckpt = {
             'iter': iteration,
 
-            'scale_model': self.accelerator.unwrap_model(self.scale_model).state_dict(),
+            'epoch': epoch,
 
-            'optimizer_scale_model': self.optimizer_scale_model.state_dict(),
+            # 'scale_model': self.accelerator.unwrap_model(self.scale_model).state_dict(),
+            'rel_depth_model': self.accelerator.unwrap_model(self.depth_anything).state_dict(),
 
-            'scheduler_scale_model': self.scheduler_scale_model.state_dict(),
+            'optimizer_depth_model': self.optimizer_scale_model.state_dict(),
+
+            'scheduler_depth_model': self.scheduler_scale_model.state_dict(),
     
         }
 
-        checkpoint_path = os.path.join(checkpoint_dir, f'ckpt_iter_{iteration}.pth')
+        checkpoint_path = os.path.join(checkpoint_dir, f'ckpt_epoch_{epoch}_iter_{iteration}.pth')
         torch.save(ckpt, checkpoint_path)
         logger.info(f'Checkpoint saved at {checkpoint_path}')
     
