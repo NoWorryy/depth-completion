@@ -234,7 +234,7 @@ if __name__ == '__main__':
     cfg_path = '/home/sbq/codes/depth-completion/configs/kitti_train.yaml'
 
     args = OmegaConf.load(cfg_path)
-    print(args['dataset_val_params'])
+    # print(args['dataset_val_params'])
     
     dataset = KBNetTrainingDataset(**args['dataset_train_params'])
     # dataset = KBNetInferenceDataset(**args['dataset_val_params'])

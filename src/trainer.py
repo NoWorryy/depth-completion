@@ -88,9 +88,10 @@ def main(device: str,
     # training
     train_data_length = len(dataloader)     # 72400 --> 3017
     # train_data_length_bs7 = 85898 // 8 + 1
-    start_epoch = trainer.iter // train_data_length
+    # start_epoch = trainer.iter // train_data_length
+    start_epoch = trainer.epoch
     max_epoch = train_params['learning_schedule'][-1]
-    max_train_steps = max_epoch * train_data_length
+    max_train_steps = (max_epoch - start_epoch) * train_data_length
     iteration = trainer.iter
 
     if trainer.accelerator.is_main_process:
@@ -102,7 +103,7 @@ def main(device: str,
 
         tb_writer = SummaryWriter(log_dir = event_path)
 
-        progress_bar = tqdm(range(iteration, max_train_steps))
+        progress_bar = tqdm(range(max_train_steps))
         progress_bar.set_description("Steps")
 
         cmap = matplotlib.colormaps.get_cmap('Spectral_r')
@@ -154,7 +155,7 @@ def main(device: str,
                 write_loss(iteration, tb_writer, losses)
                 
                 if (iteration % train_params['n_ckpt']) == 0:
-                    trainer.save_checkpoint(os.path.join(output_dir, 'checkpoints'), iteration)
+                    trainer.save_checkpoint(os.path.join(output_dir, 'checkpoints'), iteration, epoch)
 
                 if (iteration % train_params['n_img']) == 0:
 

@@ -77,17 +77,17 @@ class Train_net(torch.nn.Module):
         self.optimizer_scale_model = torch.optim.Adam(self.scale_model.parameters(), lr=train_params['lr_scale'], betas=(0.9, 0.999))
         logger.info('Optimizers initialized.')
 
+        # loss权重配置及模型加载
+        self.loss_weights = train_params['loss_weights']
+        self.iter, self.epoch = self.load_ckpt(pretrained_weights)
+        logger.info('Ckpt loaded.')
+
 
         # 学习率调整器
         logger.info('Initializing schedulers:')
-        self.scheduler_scale_model = MultiStepLR(self.optimizer_scale_model, train_params['learning_schedule'], gamma=0.5, last_epoch=-1)
+        self.scheduler_scale_model = MultiStepLR(self.optimizer_scale_model, train_params['learning_schedule'], gamma=0.5, last_epoch=self.epoch-1)
         logger.info('Schedulers initialized.')
 
-
-        # loss权重配置及模型加载
-        self.loss_weights = train_params['loss_weights']
-        self.iter = self.load_ckpt(pretrained_weights)
-        logger.info('Ckpt loaded.')
 
         # self.train_transforms = Transforms(**train_params['aug_params'])
         if mode == 'test':
@@ -272,6 +272,7 @@ class Train_net(torch.nn.Module):
     def load_ckpt(self, pretrained_weights):
         # 加载预训练权重
         iter = 0
+        epoch = 0
         model_path = pretrained_weights.get('model_path', None)
         if model_path is not None:
             logger.info(f"load model checkpoint: {model_path}")
@@ -290,19 +291,20 @@ class Train_net(torch.nn.Module):
             self.optimizer_scale_model.load_state_dict(ckpt['optimizer_scale_model'])
      
             # Load scheduler states
-            self.scheduler_scale_model.load_state_dict(ckpt['scheduler_scale_model'])
+            # self.scheduler_scale_model.load_state_dict(ckpt['scheduler_scale_model'])
   
             iter = ckpt.get('iter', 0)
-            logger.info(f"iter loaded: {iter}")
+            epoch = ckpt.get('epoch', 0)
+            logger.info(f"epoch loaded: {epoch}, iter loaded: {iter}")
         
         depth_anything_ckpt_path = pretrained_weights.get('depth_anything_ckpt', None)
         m, u = self.depth_anything.load_state_dict(torch.load(depth_anything_ckpt_path), strict=False)
-        logger.info(f"scale_model loaded, missing keys: {len(m)}, unexpected keys: {len(u)}")
+        logger.info(f"depth anything loaded, missing keys: {len(m)}, unexpected keys: {len(u)}")
         
-        return iter
+        return iter, epoch
 
 
-    def save_checkpoint(self, checkpoint_dir, iteration):
+    def save_checkpoint(self, checkpoint_dir, iteration, epoch):
         """
         Save the current state of the model, optimizers, and other necessary components.
 
@@ -315,6 +317,8 @@ class Train_net(torch.nn.Module):
         ckpt = {
             'iter': iteration,
 
+            'epoch': epoch,
+
             'scale_model': self.accelerator.unwrap_model(self.scale_model).state_dict(),
 
             'optimizer_scale_model': self.optimizer_scale_model.state_dict(),
@@ -323,7 +327,7 @@ class Train_net(torch.nn.Module):
     
         }
 
-        checkpoint_path = os.path.join(checkpoint_dir, f'ckpt_iter_{iteration}.pth')
+        checkpoint_path = os.path.join(checkpoint_dir, f'ckpt_epoch_{epoch}_iter_{iteration}.pth')
         torch.save(ckpt, checkpoint_path)
         logger.info(f'Checkpoint saved at {checkpoint_path}')
     
